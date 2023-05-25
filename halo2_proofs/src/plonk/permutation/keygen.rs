@@ -240,7 +240,7 @@ impl Assembly {
     /// This will only get executed once.
     pub fn build_ordered_mapping(&mut self) {
         // will only get called once
-        if self.ordered_cycles.len() == 0 && self.cycles.len() > 0 {
+        if self.ordered_cycles.is_empty() && !self.cycles.is_empty() {
             self.ordered_cycles = self
                 .cycles
                 .par_iter_mut()
@@ -257,7 +257,7 @@ impl Assembly {
 
     fn mapping_at_idx(&self, col: usize, row: usize) -> (usize, usize) {
         assert!(
-            self.ordered_cycles.len() > 0 || self.cycles.len() == 0,
+            !self.ordered_cycles.is_empty() || self.cycles.is_empty(),
             "cycles have not been ordered"
         );
 
