@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use ff::{Field, PrimeField};
 use group::Curve;
 use rayon::prelude::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelIterator, ParallelSliceMut,
 };
 
 use super::{Argument, ProvingKey, VerifyingKey};
@@ -147,7 +148,9 @@ pub struct Assembly {
     /// Columns that participate on the copy permutation argument.
     columns: Vec<Column<Any>>,
     /// Mapping of the actual copies done.
-    cycles: Vec<BTreeSet<(usize, usize)>>,
+    cycles: Vec<Vec<(usize, usize)>>,
+    /// Mapping of the actual copies done.
+    ordered_cycles: Vec<BTreeSet<(usize, usize)>>,
     /// Mapping of the actual copies done.
     aux: HashMap<(usize, usize), usize>,
     /// total length of a column
@@ -161,7 +164,8 @@ impl Assembly {
     pub(crate) fn new(n: usize, p: &Argument) -> Self {
         Assembly {
             columns: p.columns.clone(),
-            cycles: Vec::new(),
+            cycles: Vec::with_capacity(n),
+            ordered_cycles: Vec::with_capacity(n),
             aux: HashMap::new(),
             col_len: n,
             num_cols: p.columns.len(),
@@ -171,16 +175,16 @@ impl Assembly {
     pub(crate) fn copy(
         &mut self,
         left_column: Column<Any>,
-        mut left_row: usize,
+        left_row: usize,
         right_column: Column<Any>,
-        mut right_row: usize,
+        right_row: usize,
     ) -> Result<(), Error> {
-        let mut left_column = self
+        let left_column = self
             .columns
             .iter()
             .position(|c| c == &left_column)
             .ok_or(Error::ColumnNotInPermutation(left_column))?;
-        let mut right_column = self
+        let right_column = self
             .columns
             .iter()
             .position(|c| c == &right_column)
@@ -191,38 +195,14 @@ impl Assembly {
             return Err(Error::BoundsFailure);
         }
 
-        // See book/src/design/permutation.md for a description of this algorithm.
-        let mut left_cycle = self.aux.get(&(left_column, left_row));
-        let mut right_cycle = self.aux.get(&(right_column, right_row));
-
-        // If left and right are in the same cycle, do nothing.
-        if (left_cycle == right_cycle) && (left_cycle.is_some()) && (right_cycle.is_some()) {
-            return Ok(());
-        }
-
-        let left_cycle_size = match left_cycle {
-            // this should unwrap safely
-            Some(i) => self.cycles[*i].len(),
-            None => 1,
-        };
-
-        let right_cycle_size = match right_cycle {
-            // this should unwrap safely
-            Some(i) => self.cycles[*i].len(),
-            None => 1,
-        };
-
-        if left_cycle_size < right_cycle_size {
-            std::mem::swap(&mut left_cycle, &mut right_cycle);
-            std::mem::swap(&mut left_column, &mut right_column);
-            std::mem::swap(&mut left_row, &mut right_row);
-        }
+        let left_cycle = self.aux.get(&(left_column, left_row));
+        let right_cycle = self.aux.get(&(right_column, right_row));
 
         // extract cycle elements
         let right_cycle_elems = match right_cycle {
             Some(i) => {
                 let entry = self.cycles[*i].clone();
-                self.cycles[*i] = BTreeSet::new();
+                self.cycles[*i] = vec![];
                 entry
             }
             None => [(right_column, right_row)].into(),
@@ -239,8 +219,8 @@ impl Assembly {
             }
             // if they were singletons -- create a new cycle entry
             None => {
-                let mut set: BTreeSet<(usize, usize)> = right_cycle_elems.clone();
-                set.insert((left_column, left_row));
+                let mut set: Vec<(usize, usize)> = right_cycle_elems.clone();
+                set.push((left_column, left_row));
                 self.cycles.push(set);
                 let cycle_idx = self.cycles.len() - 1;
                 self.aux.insert((left_column, left_row), cycle_idx);
@@ -256,9 +236,33 @@ impl Assembly {
         Ok(())
     }
 
+    /// Builds the ordered mapping of the cycles.
+    /// This will only get executed once.
+    pub fn build_ordered_mapping(&mut self) {
+        // will only get called once
+        if self.ordered_cycles.len() == 0 && self.cycles.len() > 0 {
+            self.ordered_cycles = self
+                .cycles
+                .par_iter_mut()
+                .map(|col| {
+                    let mut set = BTreeSet::new();
+                    set.extend(col.clone());
+                    // free up memory
+                    *col = vec![];
+                    set
+                })
+                .collect();
+        }
+    }
+
     fn mapping_at_idx(&self, col: usize, row: usize) -> (usize, usize) {
+        assert!(
+            self.ordered_cycles.len() > 0 || self.cycles.len() == 0,
+            "cycles have not been ordered"
+        );
+
         if let Some(cycle_idx) = self.aux.get(&(col, row)) {
-            let cycle = &self.cycles[*cycle_idx];
+            let cycle = &self.ordered_cycles[*cycle_idx];
             let mut cycle_iter = cycle.range((
                 std::ops::Bound::Excluded((col, row)),
                 std::ops::Bound::Unbounded,
@@ -276,20 +280,22 @@ impl Assembly {
     }
 
     pub(crate) fn build_vk<'params, C: CurveAffine, P: Params<'params, C>>(
-        self,
+        &mut self,
         params: &P,
         domain: &EvaluationDomain<C::Scalar>,
         p: &Argument,
     ) -> VerifyingKey<C> {
+        self.build_ordered_mapping();
         build_vk(params, domain, p, |i, j| self.mapping_at_idx(i, j))
     }
 
     pub(crate) fn build_pk<'params, C: CurveAffine, P: Params<'params, C>>(
-        self,
+        &mut self,
         params: &P,
         domain: &EvaluationDomain<C::Scalar>,
         p: &Argument,
     ) -> ProvingKey<C> {
+        self.build_ordered_mapping();
         build_pk(params, domain, p, |i, j| self.mapping_at_idx(i, j))
     }
 
