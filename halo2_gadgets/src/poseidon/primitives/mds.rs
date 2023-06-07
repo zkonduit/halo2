@@ -81,7 +81,7 @@ pub(super) fn generate_mds<F: FromUniformBytes<64> + Ord, const T: usize>(
             if m == j {
                 acc
             } else {
-                let diff: F = (x_j - *x_m).into();
+                let diff: F = x_j - *x_m;
                 // We can invert freely; by construction, the elements of xs are distinct.
                 acc * (x - x_m) * diff.invert().unwrap()
             }
