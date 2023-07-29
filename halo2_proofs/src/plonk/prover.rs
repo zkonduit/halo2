@@ -340,22 +340,24 @@ where
                     meta.constants.clone(),
                 )?;
 
-                let mut advice_values = batch_invert_assigned::<Scheme::Scalar>(
-                    witness
-                        .advice
-                        .into_iter()
-                        .enumerate()
-                        .filter_map(|(column_index, advice)| {
-                            if column_indices.contains(&column_index) {
-                                Some(advice)
-                            } else {
-                                None
-                            }
-                        })
-                        .collect(),
-                );
+                for (column_index, advice_value) in witness
+                    .advice
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(column_index, advice)| {
+                        if column_indices.contains(&column_index) {
+                            Some(advice)
+                        } else {
+                            None
+                        }
+                    })
+                    .enumerate()
+                {
+                    // batch invert the advice values
+                    let advice_value = &mut batch_invert_assigned::<Scheme::Scalar>(
+                        vec![advice_value].into_iter().collect(),
+                    )[0];
 
-                for (column_index, advice_value) in advice_values.iter_mut().enumerate() {
                     // Pad advice values with blinded values
                     for cell in &mut advice_value[unusable_rows_start..] {
                         *cell = Scheme::Scalar::random(&mut rng);
@@ -366,7 +368,7 @@ where
 
                     // Compute advice column commitment
                     let advice_commitment_projective =
-                        params.commit_lagrange(advice_value, *advice_blind);
+                        params.commit_lagrange(&advice_value, *advice_blind);
                     let advice_commitment = advice_commitment_projective.to_affine();
                     transcript.write_point(advice_commitment)?;
 
@@ -374,6 +376,41 @@ where
                     *advice = advice_value.clone();
                 }
             }
+
+            //     let mut advice_values = batch_invert_assigned::<Scheme::Scalar>(
+            //         witness
+            //             .advice
+            //             .into_iter()
+            //             .enumerate()
+            //             .filter_map(|(column_index, advice)| {
+            //                 if column_indices.contains(&column_index) {
+            //                     Some(advice)
+            //                 } else {
+            //                     None
+            //                 }
+            //             })
+            //             .collect(),
+            //     );
+
+            //     for (column_index, advice_value) in advice_values.iter_mut().enumerate() {
+            //         // Pad advice values with blinded values
+            //         for cell in &mut advice_value[unusable_rows_start..] {
+            //             *cell = Scheme::Scalar::random(&mut rng);
+            //         }
+
+            //         let advice_blind = &mut advice.advice_blinds[column_index];
+            //         *advice_blind = Blind(Scheme::Scalar::random(&mut rng));
+
+            //         // Compute advice column commitment
+            //         let advice_commitment_projective =
+            //             params.commit_lagrange(advice_value, *advice_blind);
+            //         let advice_commitment = advice_commitment_projective.to_affine();
+            //         transcript.write_point(advice_commitment)?;
+
+            //         let advice = &mut advice.advice_polys[column_index];
+            //         *advice = advice_value.clone();
+            //     }
+            // }
 
             //     // Add blinding factors to advice columns
             //     for advice_values in &mut advice_values {
