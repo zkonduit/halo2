@@ -293,8 +293,8 @@ where
     let (advice, challenges) = {
         let mut advice = vec![
             AdviceSingle::<Scheme::Curve, LagrangeCoeff> {
-                advice_polys: vec![domain.empty_lagrange(); meta.num_advice_columns],
-                advice_blinds: vec![Blind::default(); meta.num_advice_columns],
+                advice_polys: Vec::new(), //vec![domain.empty_lagrange(); meta.num_advice_columns],
+                advice_blinds: Vec::new(), //vec![Blind::default(); meta.num_advice_columns],
             };
             instances.len()
         ];
@@ -363,17 +363,23 @@ where
                         *cell = Scheme::Scalar::random(&mut rng);
                     }
 
-                    let advice_blind = &mut advice.advice_blinds[column_index];
-                    *advice_blind = Blind(Scheme::Scalar::random(&mut rng));
+                    advice
+                        .advice_blinds
+                        .push(Blind(Scheme::Scalar::random(&mut rng)));
+                    // let advice_blind = &mut advice.advice_blinds[column_index];
+                    // *advice_blind = Blind(Scheme::Scalar::random(&mut rng));
 
                     // Compute advice column commitment
                     let advice_commitment_projective =
-                        params.commit_lagrange(&advice_value, *advice_blind);
+                        params.commit_lagrange(&advice_value, advice.advice_blinds[column_index]);
                     let advice_commitment = advice_commitment_projective.to_affine();
                     transcript.write_point(advice_commitment)?;
 
-                    let advice = &mut advice.advice_polys[column_index];
-                    *advice = advice_value.clone();
+                    let advice_value: &_ = advice_value;
+
+                    advice.advice_polys.push(advice_value.to_owned());
+                    // let advice = &mut advice.advice_polys[column_index];
+                    // *advice = advice_value.clone();
                 }
             }
 
