@@ -355,42 +355,62 @@ where
                         .collect(),
                 );
 
-                // Add blinding factors to advice columns
-                for advice_values in &mut advice_values {
-                    for cell in &mut advice_values[unusable_rows_start..] {
+                for (column_index, advice_value) in advice_values.iter_mut().enumerate() {
+                    // Pad advice values with blinded values
+                    for cell in &mut advice_value[unusable_rows_start..] {
                         *cell = Scheme::Scalar::random(&mut rng);
                     }
-                }
 
-                // Compute commitments to advice column polynomials
-                let blinds: Vec<_> = advice_values
-                    .iter()
-                    .map(|_| Blind(Scheme::Scalar::random(&mut rng)))
-                    .collect();
-                let advice_commitments_projective: Vec<_> = advice_values
-                    .iter()
-                    .zip(blinds.iter())
-                    .map(|(poly, blind)| params.commit_lagrange(poly, *blind))
-                    .collect();
-                let mut advice_commitments =
-                    vec![Scheme::Curve::identity(); advice_commitments_projective.len()];
-                <Scheme::Curve as CurveAffine>::CurveExt::batch_normalize(
-                    &advice_commitments_projective,
-                    &mut advice_commitments,
-                );
-                let advice_commitments = advice_commitments;
-                drop(advice_commitments_projective);
+                    let advice_blind = &mut advice.advice_blinds[column_index];
+                    *advice_blind = Blind(Scheme::Scalar::random(&mut rng));
 
-                for commitment in &advice_commitments {
-                    transcript.write_point(*commitment)?;
-                }
-                for ((column_index, advice_values), blind) in
-                    column_indices.iter().zip(advice_values).zip(blinds)
-                {
-                    advice.advice_polys[*column_index] = advice_values;
-                    advice.advice_blinds[*column_index] = blind;
+                    // Compute advice column commitment
+                    let advice_commitment_projective =
+                        params.commit_lagrange(advice_value, *advice_blind);
+                    let advice_commitment = advice_commitment_projective.to_affine();
+                    transcript.write_point(advice_commitment)?;
+
+                    let advice = &mut advice.advice_polys[column_index];
+                    *advice = advice_value.clone();
                 }
             }
+
+            //     // Add blinding factors to advice columns
+            //     for advice_values in &mut advice_values {
+            //         for cell in &mut advice_values[unusable_rows_start..] {
+            //             *cell = Scheme::Scalar::random(&mut rng);
+            //         }
+            //     }
+
+            //     // Compute commitments to advice column polynomials
+            //     let blinds: Vec<_> = advice_values
+            //         .iter()
+            //         .map(|_| Blind(Scheme::Scalar::random(&mut rng)))
+            //         .collect();
+            //     let advice_commitments_projective: Vec<_> = advice_values
+            //         .iter()
+            //         .zip(blinds.iter())
+            //         .map(|(poly, blind)| params.commit_lagrange(poly, *blind))
+            //         .collect();
+            //     let mut advice_commitments =
+            //         vec![Scheme::Curve::identity(); advice_commitments_projective.len()];
+            //     <Scheme::Curve as CurveAffine>::CurveExt::batch_normalize(
+            //         &advice_commitments_projective,
+            //         &mut advice_commitments,
+            //     );
+            //     let advice_commitments = advice_commitments;
+            //     drop(advice_commitments_projective);
+
+            //     for commitment in &advice_commitments {
+            //         transcript.write_point(*commitment)?;
+            //     }
+            //     for ((column_index, advice_values), blind) in
+            //         column_indices.iter().zip(advice_values).zip(blinds)
+            //     {
+            //         advice.advice_polys[*column_index] = advice_values;
+            //         advice.advice_blinds[*column_index] = blind;
+            //     }
+            // }
 
             for (index, phase) in meta.challenge_phase.iter().enumerate() {
                 if current_phase == *phase {
