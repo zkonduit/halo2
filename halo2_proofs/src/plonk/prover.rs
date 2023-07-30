@@ -9,6 +9,8 @@ use std::sync::atomic::AtomicUsize;
 use std::time::Instant;
 use std::{collections::HashMap, iter, mem, sync::atomic::Ordering};
 
+use procinfo::pid::{stat_self, statm_self};
+
 use super::{
     circuit::{
         sealed::{self, SealedPhase},
@@ -35,6 +37,16 @@ use crate::{
 };
 use group::prime::PrimeCurveAffine;
 
+/// get the mem usage of process
+pub fn getmem(mark: &str) {
+    println!(
+        "{}: total {:.3} resident {:.3}",
+        mark,
+        ((statm_self().unwrap().size * 4096) as f64) / 1073741824f64,
+        ((statm_self().unwrap().resident * 4096) as f64) / 1073741824f64
+    );
+}
+
 /// This creates a proof for the provided `circuit` when given the public
 /// parameters `params` and the proving key [`ProvingKey`] that was
 /// generated previously for the same circuit. The provided `instances`
@@ -58,6 +70,7 @@ pub fn create_proof<
 where
     Scheme::Scalar: WithSmallOrderMulGroup<3> + FromUniformBytes<64>,
 {
+    getmem("start");
     for instance in instances.iter() {
         if instance.len() != pk.vk.cs.num_instance_columns {
             return Err(Error::InvalidInstances);
@@ -137,6 +150,8 @@ where
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
+
+    getmem("2");
 
     #[derive(Clone)]
     struct AdviceSingle<C: CurveAffine, B: Basis> {
@@ -290,6 +305,8 @@ where
         }
     }
 
+    getmem("4");
+
     let (advice, challenges) = {
         let mut advice = vec![
             AdviceSingle::<Scheme::Curve, LagrangeCoeff> {
@@ -300,6 +317,7 @@ where
         ];
         let mut challenges = HashMap::<usize, Scheme::Scalar>::with_capacity(meta.num_challenges);
 
+        getmem("5");
         let unusable_rows_start = params.n() as usize - (meta.blinding_factors() + 1);
         for current_phase in pk.vk.cs.phases() {
             let column_indices = meta
@@ -314,6 +332,8 @@ where
                     }
                 })
                 .collect::<BTreeSet<_>>();
+
+            getmem("6");
 
             for ((circuit, advice), instances) in
                 circuits.iter().zip(advice.iter_mut()).zip(instances)
@@ -340,6 +360,8 @@ where
                     meta.constants.clone(),
                 )?;
 
+                getmem("7");
+
                 for (column_index, advice_value) in witness
                     .advice
                     .into_iter()
@@ -353,6 +375,7 @@ where
                     })
                     .enumerate()
                 {
+                    getmem("inside col loop");
                     // batch invert the advice values
                     let advice_value = &mut batch_invert_assigned::<Scheme::Scalar>(
                         vec![advice_value].into_iter().collect(),
@@ -382,6 +405,7 @@ where
                     // *advice = advice_value.clone();
                 }
             }
+            getmem("8");
 
             for (index, phase) in meta.challenge_phase.iter().enumerate() {
                 if current_phase == *phase {
@@ -393,6 +417,7 @@ where
         }
 
         assert_eq!(challenges.len(), meta.num_challenges);
+        getmem("before challenges");
         let challenges = (0..meta.num_challenges)
             .map(|index| challenges.remove(&index).unwrap())
             .collect::<Vec<_>>();
@@ -402,6 +427,8 @@ where
 
     // Sample theta challenge for keeping lookup columns linearly independent
     let theta: ChallengeTheta<_> = transcript.squeeze_challenge_scalar();
+
+    getmem("before lookups");
 
     let lookups: Vec<Vec<lookup::prover::Permuted<Scheme::Curve>>> = instance
         .iter()
@@ -430,11 +457,15 @@ where
         })
         .collect::<Result<Vec<_>, _>>()?;
 
+    getmem("after lookups");
+
     // Sample beta challenge
     let beta: ChallengeBeta<_> = transcript.squeeze_challenge_scalar();
 
     // Sample gamma challenge
     let gamma: ChallengeGamma<_> = transcript.squeeze_challenge_scalar();
+
+    getmem("before permutation commit");
 
     // Commit to permutations.
     let permutations: Vec<permutation::prover::Committed<Scheme::Curve>> = instance
@@ -456,6 +487,7 @@ where
         })
         .collect::<Result<Vec<_>, _>>()?;
 
+    getmem("after perm, before lookups");
     let lookups: Vec<Vec<lookup::prover::Committed<Scheme::Curve>>> = lookups
         .into_iter()
         .map(|lookups| -> Result<Vec<_>, _> {
@@ -467,12 +499,15 @@ where
         })
         .collect::<Result<Vec<_>, _>>()?;
 
+    getmem("before vanishing");
     // Commit to the vanishing argument's random polynomial for blinding h(x_3)
     let vanishing = vanishing::Argument::commit(params, domain, &mut rng, transcript)?;
 
+    getmem("after vanishing");
     // Obtain challenge for keeping all separate gates linearly independent
     let y: ChallengeY<_> = transcript.squeeze_challenge_scalar();
 
+    getmem("calc advice polys");
     // Calculate the advice polys
     let advice: Vec<AdviceSingle<Scheme::Curve, Coeff>> = advice
         .into_iter()
@@ -492,6 +527,7 @@ where
         )
         .collect();
 
+    getmem("h poly");
     // Evaluate the h(X) polynomial
     let h_poly = pk.ev.evaluate_h(
         pk,
@@ -512,6 +548,7 @@ where
         &permutations,
     );
 
+    getmem("vanishing");
     // Construct the vanishing argument's h(X) commitments
     let vanishing = vanishing.construct(params, domain, h_poly, &mut rng, transcript)?;
 
@@ -540,6 +577,7 @@ where
         }
     }
 
+    getmem("advice evals");
     // Compute and hash advice evals for each circuit instance
     for advice in advice.iter() {
         // Evaluate polynomials at omega^i x
@@ -560,6 +598,7 @@ where
         }
     }
 
+    getmem("fixed  evals");
     // Compute and hash fixed evals (shared across all circuit instances)
     let fixed_evals: Vec<_> = meta
         .fixed_queries
