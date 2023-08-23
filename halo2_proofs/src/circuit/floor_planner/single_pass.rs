@@ -416,7 +416,7 @@ impl<'r, 'a, F: Field, CS: Assignment<F> + 'a> fmt::Debug for SimpleTableLayoute
 }
 
 impl<'r, 'a, F: Field, CS: Assignment<F> + 'a> SimpleTableLayouter<'r, 'a, F, CS> {
-    ///
+    /// Returns a new SimpleTableLayouter
     pub fn new(cs: &'a mut CS, used_columns: &'r [TableColumn]) -> Self {
         SimpleTableLayouter {
             cs,
