@@ -200,7 +200,7 @@ impl CircuitLayout {
                 [top_left, bottom_right],
                 ShapeStyle::from(&GREEN.mix(0.2)).filled(),
             ))?;
-            root.draw(&Rectangle::new([top_left, bottom_right], &BLACK))?;
+            root.draw(&Rectangle::new([top_left, bottom_right], BLACK))?;
             Ok(())
         };
 
