@@ -66,9 +66,9 @@ where
         }
     }
 
-    dbg!("instances.len() = {}", instances.len());
-    dbg!("instances[0].len() = {}", instances[0].len());
-    dbg!(
+    log::debug!("instances.len() = {}", instances.len());
+    log::debug!("instances[0].len() = {}", instances[0].len());
+    log::debug!(
         "pk.vk.cs.num_instance_columns = {}",
         pk.vk.cs.num_instance_columns
     );
@@ -76,17 +76,17 @@ where
     // Hash verification key into transcript
     pk.vk.hash_into(transcript)?;
 
-    dbg!("hash_into(transcript) done");
-    dbg!("transcript = {:?}", &transcript);
+    log::debug!("hash_into(transcript) done");
+    log::debug!("transcript = {:?}", &transcript);
 
     let domain = &pk.vk.domain;
-    dbg!("domain = {:?}", domain);
+    log::debug!("domain = {:?}", domain);
     let mut meta = ConstraintSystem::default();
     #[cfg(feature = "circuit-params")]
     let config = ConcreteCircuit::configure_with_params(&mut meta, circuits[0].params());
     #[cfg(not(feature = "circuit-params"))]
     let config = ConcreteCircuit::configure(&mut meta);
-    dbg!("meta = {:?}", meta);
+    log::debug!("meta = {:?}", meta);
 
     // Selector optimizations cannot be applied here; use the ConstraintSystem
     // from the verification key.
@@ -153,7 +153,7 @@ where
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    dbg!("instance = {:?}", &instance);
+    log::debug!("instance = {:?}", &instance);
 
     #[derive(Clone, Debug)]
     struct AdviceSingle<C: CurveAffine, B: Basis> {
@@ -426,13 +426,13 @@ where
         (advice, challenges)
     };
 
-    dbg!("advice = {:?}", &advice);
-    dbg!("challenges = {:?}", &challenges);
+    log::debug!("advice = {:?}", &advice);
+    log::debug!("challenges = {:?}", &challenges);
 
     // Sample theta challenge for keeping lookup columns linearly independent
     let theta: ChallengeTheta<_> = transcript.squeeze_challenge_scalar();
 
-    dbg!("theta = {:?}", &theta);
+    log::debug!("theta = {:?}", &theta);
 
     let lookups: Vec<Vec<lookup::prover::Permuted<Scheme::Curve>>> = instance
         .iter()
@@ -461,15 +461,15 @@ where
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    dbg!("lookups = {:?}", &lookups);
+    log::debug!("lookups = {:?}", &lookups);
 
     // Sample beta challenge
     let beta: ChallengeBeta<_> = transcript.squeeze_challenge_scalar();
-    dbg!("beta = {:?}", &beta);
+    log::debug!("beta = {:?}", &beta);
 
     // Sample gamma challenge
     let gamma: ChallengeGamma<_> = transcript.squeeze_challenge_scalar();
-    dbg!("gamma = {:?}", &gamma);
+    log::debug!("gamma = {:?}", &gamma);
 
     // Commit to permutations.
     let permutations: Vec<permutation::prover::Committed<Scheme::Curve>> = instance
@@ -491,7 +491,7 @@ where
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    dbg!("permutations = {:?}", &permutations);
+    log::debug!("permutations = {:?}", &permutations);
 
     let lookups: Vec<Vec<lookup::prover::Committed<Scheme::Curve>>> = lookups
         .into_iter()
@@ -504,7 +504,7 @@ where
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    dbg!("lookups = {:?}", &lookups);
+    log::debug!("lookups = {:?}", &lookups);
 
     let shuffles: Vec<Vec<shuffle::prover::Committed<Scheme::Curve>>> = instance
         .iter()
@@ -534,17 +534,17 @@ where
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    dbg!("shuffles = {:?}", &shuffles);
+    log::debug!("shuffles = {:?}", &shuffles);
 
     // Commit to the vanishing argument's random polynomial for blinding h(x_3)
     let vanishing = vanishing::Argument::commit(params, domain, &mut rng, transcript)?;
 
-    dbg!("vanishing = {:?}", &vanishing);
+    log::debug!("vanishing = {:?}", &vanishing);
 
     // Obtain challenge for keeping all separate gates linearly independent
     let y: ChallengeY<_> = transcript.squeeze_challenge_scalar();
 
-    dbg!("y = {:?}", &y);
+    log::debug!("y = {:?}", &y);
 
     // Calculate the advice polys
     let advice: Vec<AdviceSingle<Scheme::Curve, Coeff>> = advice
@@ -565,7 +565,7 @@ where
         )
         .collect();
 
-    dbg!("advice = {:?}", &advice);
+    log::debug!("advice = {:?}", &advice);
 
     // Evaluate the h(X) polynomial
     let h_poly = pk.ev.evaluate_h(
@@ -588,18 +588,18 @@ where
         &permutations,
     );
 
-    dbg!("h_poly = {:?}", &h_poly);
+    log::debug!("h_poly = {:?}", &h_poly);
 
     // Construct the vanishing argument's h(X) commitments
     let vanishing = vanishing.construct(params, domain, h_poly, &mut rng, transcript)?;
 
-    dbg!("vanishing = {:?}", &vanishing);
+    log::debug!("vanishing = {:?}", &vanishing);
 
     let x: ChallengeX<_> = transcript.squeeze_challenge_scalar();
-    dbg!("x = {:?}", &x);
+    log::debug!("x = {:?}", &x);
 
     let xn = x.pow([params.n(), 0, 0, 0]);
-    dbg!("xn = {:?}", &xn);
+    log::debug!("xn = {:?}", &xn);
 
     if P::QUERY_INSTANCE {
         // Compute and hash instance evals for each circuit instance
@@ -643,7 +643,7 @@ where
         }
     }
 
-    dbg!("transcript after advice evals = {:?}", &transcript);
+    log::debug!("transcript after advice evals = {:?}", &transcript);
 
     // Compute and hash fixed evals (shared across all circuit instances)
     let fixed_evals: Vec<_> = meta
@@ -659,10 +659,10 @@ where
         transcript.write_scalar(*eval)?;
     }
 
-    dbg!("transcript after fixed evals = {:?}", &transcript);
+    log::debug!("transcript after fixed evals = {:?}", &transcript);
 
     let vanishing = vanishing.evaluate(x, xn, domain, transcript)?;
-    dbg!("vanishing = {:?}", &vanishing);
+    log::debug!("vanishing = {:?}", &vanishing);
 
     // Evaluate common permutation data
     pk.permutation.evaluate(x, transcript)?;
@@ -672,7 +672,7 @@ where
         .into_iter()
         .map(|permutation| -> Result<_, _> { permutation.construct().evaluate(pk, x, transcript) })
         .collect::<Result<Vec<_>, _>>()?;
-    dbg!("permutations = {:?}", &permutations);
+    log::debug!("permutations = {:?}", &permutations);
 
     // Evaluate the lookups, if any, at omega^i x.
     let lookups: Vec<Vec<lookup::prover::Evaluated<Scheme::Curve>>> = lookups
@@ -684,7 +684,7 @@ where
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
-    dbg!("lookups = {:?}", &lookups);
+    log::debug!("lookups = {:?}", &lookups);
     // Evaluate the shuffles, if any, at omega^i x.
     let shuffles: Vec<Vec<shuffle::prover::Evaluated<Scheme::Curve>>> = shuffles
         .into_iter()
@@ -695,7 +695,7 @@ where
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
-    dbg!("shuffles = {:?}", &shuffles);
+    log::debug!("shuffles = {:?}", &shuffles);
     let instances = instance
         .iter()
         .zip(advice.iter())
@@ -745,7 +745,7 @@ where
         .chain(pk.permutation.open(x))
         // We query the h(X) polynomial at x
         .chain(vanishing.open(x));
-    dbg!("instances = {:?}", &instances.clone().collect::<Vec<_>>());
+    log::debug!("instances = {:?}", &instances.clone().collect::<Vec<_>>());
     let prover = P::new(params);
     prover
         .create_proof(rng, transcript, instances)
