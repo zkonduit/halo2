@@ -417,7 +417,7 @@ fn permute_expression_pair<'params, C: CurveAffine, P: Params<'params, C>, R: Rn
     let res =
         permute_expression_pair_par(pk, params, domain, rng, input_expression, table_expression);
     #[cfg(not(target_arch = "wasm32"))]
-    log::debug!(start.elapsed());
+    log::debug!("{:?}", start.elapsed());
     res
 }
 
