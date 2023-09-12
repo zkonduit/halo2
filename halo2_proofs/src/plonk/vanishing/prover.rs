@@ -17,18 +17,20 @@ use crate::{
     },
     transcript::{EncodedChallenge, TranscriptWrite},
 };
-
+#[derive(Clone, Debug)]
 pub(in crate::plonk) struct Committed<C: CurveAffine> {
     random_poly: Polynomial<C::Scalar, Coeff>,
     random_blind: Blind<C::Scalar>,
 }
 
+#[derive(Clone, Debug)]
 pub(in crate::plonk) struct Constructed<C: CurveAffine> {
     h_pieces: Vec<Polynomial<C::Scalar, Coeff>>,
     h_blinds: Vec<Blind<C::Scalar>>,
     committed: Committed<C>,
 }
 
+#[derive(Clone, Debug)]
 pub(in crate::plonk) struct Evaluated<C: CurveAffine> {
     h_poly: Polynomial<C::Scalar, Coeff>,
     h_blind: Blind<C::Scalar>,

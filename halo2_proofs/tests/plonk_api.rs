@@ -468,6 +468,7 @@ fn plonk_api() {
     ) -> Vec<u8>
     where
         Scheme::Scalar: Ord + WithSmallOrderMulGroup<3> + FromUniformBytes<64>,
+        T: std::fmt::Debug,
     {
         let (a, instance, lookup_table) = common!(Scheme);
 

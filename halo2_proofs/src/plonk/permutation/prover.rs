@@ -19,25 +19,27 @@ use crate::{
     transcript::{EncodedChallenge, TranscriptWrite},
 };
 
+#[derive(Clone, Debug)]
 pub(crate) struct CommittedSet<C: CurveAffine> {
     pub(crate) permutation_product_poly: Polynomial<C::Scalar, Coeff>,
     pub(crate) permutation_product_coset: Polynomial<C::Scalar, ExtendedLagrangeCoeff>,
     permutation_product_blind: Blind<C::Scalar>,
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct Committed<C: CurveAffine> {
     pub(crate) sets: Vec<CommittedSet<C>>,
 }
-
+#[derive(Clone, Debug)]
 pub struct ConstructedSet<C: CurveAffine> {
     permutation_product_poly: Polynomial<C::Scalar, Coeff>,
     permutation_product_blind: Blind<C::Scalar>,
 }
-
+#[derive(Clone, Debug)]
 pub(crate) struct Constructed<C: CurveAffine> {
     sets: Vec<ConstructedSet<C>>,
 }
-
+#[derive(Clone, Debug)]
 pub(crate) struct Evaluated<C: CurveAffine> {
     constructed: Constructed<C>,
 }
