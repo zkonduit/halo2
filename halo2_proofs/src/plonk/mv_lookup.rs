@@ -12,11 +12,13 @@ pub fn base_degree(table_degree: usize) -> usize {
     std::cmp::max(3, table_degree + 2)
 }
 
+///
 pub fn degree_with_input(base_degree: usize, input_expression_degree: usize) -> usize {
     base_degree + input_expression_degree
 }
 
 #[derive(Clone)]
+///
 pub struct Argument<F: Field> {
     pub(crate) table_expressions: Vec<Expression<F>>,
     pub(crate) inputs_expressions: Vec<Vec<Expression<F>>>,

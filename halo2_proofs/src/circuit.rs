@@ -1,702 +1,458 @@
-use super::{mv_lookup, permutation, shuffle, Assigned, Error};
-use crate::circuit::layouter::SyncDeps;
-use crate::dev::metadata;
-use crate::{
-    circuit::{Layouter, Region, Value},
-    poly::Rotation,
-};
-use core::cmp::max;
-use core::ops::{Add, Mul};
+//! Traits and structs for implementing circuit components.
+
+use std::{convert::TryInto, fmt, marker::PhantomData};
+
 use ff::Field;
-use sealed::SealedPhase;
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
-use std::fmt::{Debug, Formatter};
-use std::{
-    convert::TryFrom,
-    ops::{Neg, Sub},
+
+use crate::plonk::{
+    Advice, Any, Assigned, Challenge, Column, Error, Fixed, Instance, Selector, TableColumn,
 };
 
-mod compress_selectors;
+mod value;
+pub use value::Value;
 
-/// A column type
-pub trait ColumnType:
-    'static + Sized + Copy + std::fmt::Debug + PartialEq + Eq + Into<Any>
+pub mod floor_planner;
+pub use floor_planner::single_pass::SimpleFloorPlanner;
+pub use floor_planner::single_pass::SimpleTableLayouter;
+
+pub mod layouter;
+
+/// A chip implements a set of instructions that can be used by gadgets.
+///
+/// The chip stores state that is required at circuit synthesis time in
+/// [`Chip::Config`], which can be fetched via [`Chip::config`].
+///
+/// The chip also loads any fixed configuration needed at synthesis time
+/// using its own implementation of `load`, and stores it in [`Chip::Loaded`].
+/// This can be accessed via [`Chip::loaded`].
+pub trait Chip<F: Field>: Sized {
+    /// A type that holds the configuration for this chip, and any other state it may need
+    /// during circuit synthesis, that can be derived during [`Circuit::configure`].
+    ///
+    /// [`Circuit::configure`]: crate::plonk::Circuit::configure
+    type Config: fmt::Debug + Clone;
+
+    /// A type that holds any general chip state that needs to be loaded at the start of
+    /// [`Circuit::synthesize`]. This might simply be `()` for some chips.
+    ///
+    /// [`Circuit::synthesize`]: crate::plonk::Circuit::synthesize
+    type Loaded: fmt::Debug + Clone;
+
+    /// The chip holds its own configuration.
+    fn config(&self) -> &Self::Config;
+
+    /// Provides access to general chip state loaded at the beginning of circuit
+    /// synthesis.
+    ///
+    /// Panics if called before `Chip::load`.
+    fn loaded(&self) -> &Self::Loaded;
+}
+
+/// Index of a region in a layouter
+#[derive(Clone, Copy, Debug)]
+pub struct RegionIndex(usize);
+
+impl From<usize> for RegionIndex {
+    fn from(idx: usize) -> RegionIndex {
+        RegionIndex(idx)
+    }
+}
+
+impl std::ops::Deref for RegionIndex {
+    type Target = usize;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// Starting row of a region in a layouter
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RegionStart(usize);
+
+impl From<usize> for RegionStart {
+    fn from(idx: usize) -> RegionStart {
+        RegionStart(idx)
+    }
+}
+
+impl std::ops::Deref for RegionStart {
+    type Target = usize;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A pointer to a cell within a circuit.
+#[derive(Clone, Copy, Debug)]
+pub struct Cell {
+    /// Identifies the region in which this cell resides.
+    pub region_index: RegionIndex,
+    /// The relative offset of this cell within its region.
+    pub row_offset: usize,
+    /// The column of this cell.
+    pub column: Column<Any>,
+}
+
+/// An assigned cell.
+#[derive(Clone, Debug)]
+pub struct AssignedCell<V, F: Field> {
+    value: Value<V>,
+    cell: Cell,
+    _marker: PhantomData<F>,
+}
+
+impl<V, F: Field> AssignedCell<V, F> {
+    /// Returns the value of the [`AssignedCell`].
+    pub fn value(&self) -> Value<&V> {
+        self.value.as_ref()
+    }
+
+    /// Returns the cell.
+    pub fn cell(&self) -> Cell {
+        self.cell
+    }
+}
+
+impl<V, F: Field> AssignedCell<V, F>
+where
+    for<'v> Assigned<F>: From<&'v V>,
 {
-    /// Return expression from cell
-    fn query_cell<F: Field>(&self, index: usize, at: Rotation) -> Expression<F>;
-}
-
-/// A column with an index and type
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct Column<C: ColumnType> {
-    index: usize,
-    column_type: C,
-}
-
-impl<C: ColumnType> Column<C> {
-    #[cfg(test)]
-    pub(crate) fn new(index: usize, column_type: C) -> Self {
-        Column { index, column_type }
-    }
-
-    /// Index of this column.
-    pub fn index(&self) -> usize {
-        self.index
-    }
-
-    /// Type of this column.
-    pub fn column_type(&self) -> &C {
-        &self.column_type
-    }
-
-    /// Return expression from column at a relative position
-    pub fn query_cell<F: Field>(&self, at: Rotation) -> Expression<F> {
-        self.column_type.query_cell(self.index, at)
-    }
-
-    /// Return expression from column at the current row
-    pub fn cur<F: Field>(&self) -> Expression<F> {
-        self.query_cell(Rotation::cur())
-    }
-
-    /// Return expression from column at the next row
-    pub fn next<F: Field>(&self) -> Expression<F> {
-        self.query_cell(Rotation::next())
-    }
-
-    /// Return expression from column at the previous row
-    pub fn prev<F: Field>(&self) -> Expression<F> {
-        self.query_cell(Rotation::prev())
-    }
-
-    /// Return expression from column at the specified rotation
-    pub fn rot<F: Field>(&self, rotation: i32) -> Expression<F> {
-        self.query_cell(Rotation(rotation))
+    /// Returns the field element value of the [`AssignedCell`].
+    pub fn value_field(&self) -> Value<Assigned<F>> {
+        self.value.to_field()
     }
 }
 
-impl<C: ColumnType> Ord for Column<C> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // This ordering is consensus-critical! The layouters rely on deterministic column
-        // orderings.
-        match self.column_type.into().cmp(&other.column_type.into()) {
-            // Indices are assigned within column types.
-            std::cmp::Ordering::Equal => self.index.cmp(&other.index),
-            order => order,
-        }
-    }
-}
-
-impl<C: ColumnType> PartialOrd for Column<C> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-pub(crate) mod sealed {
-    /// Phase of advice column
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-    pub struct Phase(pub(super) u8);
-
-    impl Phase {
-        pub fn prev(&self) -> Option<Phase> {
-            self.0.checked_sub(1).map(Phase)
-        }
-    }
-
-    impl SealedPhase for Phase {
-        fn to_sealed(self) -> Phase {
-            self
-        }
-    }
-
-    /// Sealed trait to help keep `Phase` private.
-    pub trait SealedPhase {
-        fn to_sealed(self) -> Phase;
-    }
-}
-
-/// Phase of advice column
-pub trait Phase: SealedPhase {}
-
-impl<P: SealedPhase> Phase for P {}
-
-/// First phase
-#[derive(Debug)]
-pub struct FirstPhase;
-
-impl SealedPhase for super::FirstPhase {
-    fn to_sealed(self) -> sealed::Phase {
-        sealed::Phase(0)
-    }
-}
-
-/// Second phase
-#[derive(Debug)]
-pub struct SecondPhase;
-
-impl SealedPhase for super::SecondPhase {
-    fn to_sealed(self) -> sealed::Phase {
-        sealed::Phase(1)
-    }
-}
-
-/// Third phase
-#[derive(Debug)]
-pub struct ThirdPhase;
-
-impl SealedPhase for super::ThirdPhase {
-    fn to_sealed(self) -> sealed::Phase {
-        sealed::Phase(2)
-    }
-}
-
-/// An advice column
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
-pub struct Advice {
-    pub(crate) phase: sealed::Phase,
-}
-
-impl Default for Advice {
-    fn default() -> Advice {
-        Advice {
-            phase: FirstPhase.to_sealed(),
-        }
-    }
-}
-
-impl Advice {
-    /// Returns `Advice` in given `Phase`
-    pub fn new<P: Phase>(phase: P) -> Advice {
-        Advice {
-            phase: phase.to_sealed(),
-        }
-    }
-
-    /// Phase of this column
-    pub fn phase(&self) -> u8 {
-        self.phase.0
-    }
-}
-
-impl std::fmt::Debug for Advice {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut debug_struct = f.debug_struct("Advice");
-        // Only show advice's phase if it's not in first phase.
-        if self.phase != FirstPhase.to_sealed() {
-            debug_struct.field("phase", &self.phase);
-        }
-        debug_struct.finish()
-    }
-}
-
-/// A fixed column
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct Fixed;
-
-/// An instance column
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct Instance;
-
-/// An enum over the Advice, Fixed, Instance structs
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
-pub enum Any {
-    /// An Advice variant
-    Advice(Advice),
-    /// A Fixed variant
-    Fixed,
-    /// An Instance variant
-    Instance,
-}
-
-impl Any {
-    /// Returns Advice variant in `FirstPhase`
-    pub fn advice() -> Any {
-        Any::Advice(Advice::default())
-    }
-
-    /// Returns Advice variant in given `Phase`
-    pub fn advice_in<P: Phase>(phase: P) -> Any {
-        Any::Advice(Advice::new(phase))
-    }
-}
-
-impl std::fmt::Debug for Any {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Any::Advice(advice) => {
-                let mut debug_struct = f.debug_struct("Advice");
-                // Only show advice's phase if it's not in first phase.
-                if advice.phase != FirstPhase.to_sealed() {
-                    debug_struct.field("phase", &advice.phase);
-                }
-                debug_struct.finish()
-            }
-            Any::Fixed => f.debug_struct("Fixed").finish(),
-            Any::Instance => f.debug_struct("Instance").finish(),
-        }
-    }
-}
-
-impl Ord for Any {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // This ordering is consensus-critical! The layouters rely on deterministic column
-        // orderings.
-        match (self, other) {
-            (Any::Instance, Any::Instance) | (Any::Fixed, Any::Fixed) => std::cmp::Ordering::Equal,
-            (Any::Advice(lhs), Any::Advice(rhs)) => lhs.phase.cmp(&rhs.phase),
-            // Across column types, sort Instance < Advice < Fixed.
-            (Any::Instance, Any::Advice(_))
-            | (Any::Advice(_), Any::Fixed)
-            | (Any::Instance, Any::Fixed) => std::cmp::Ordering::Less,
-            (Any::Fixed, Any::Instance)
-            | (Any::Fixed, Any::Advice(_))
-            | (Any::Advice(_), Any::Instance) => std::cmp::Ordering::Greater,
-        }
-    }
-}
-
-impl PartialOrd for Any {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl ColumnType for Advice {
-    fn query_cell<F: Field>(&self, index: usize, at: Rotation) -> Expression<F> {
-        Expression::Advice(AdviceQuery {
-            index: None,
-            column_index: index,
-            rotation: at,
-            phase: self.phase,
-        })
-    }
-}
-impl ColumnType for Fixed {
-    fn query_cell<F: Field>(&self, index: usize, at: Rotation) -> Expression<F> {
-        Expression::Fixed(FixedQuery {
-            index: None,
-            column_index: index,
-            rotation: at,
-        })
-    }
-}
-impl ColumnType for Instance {
-    fn query_cell<F: Field>(&self, index: usize, at: Rotation) -> Expression<F> {
-        Expression::Instance(InstanceQuery {
-            index: None,
-            column_index: index,
-            rotation: at,
-        })
-    }
-}
-impl ColumnType for Any {
-    fn query_cell<F: Field>(&self, index: usize, at: Rotation) -> Expression<F> {
-        match self {
-            Any::Advice(Advice { phase }) => Expression::Advice(AdviceQuery {
-                index: None,
-                column_index: index,
-                rotation: at,
-                phase: *phase,
-            }),
-            Any::Fixed => Expression::Fixed(FixedQuery {
-                index: None,
-                column_index: index,
-                rotation: at,
-            }),
-            Any::Instance => Expression::Instance(InstanceQuery {
-                index: None,
-                column_index: index,
-                rotation: at,
-            }),
-        }
-    }
-}
-
-impl From<Advice> for Any {
-    fn from(advice: Advice) -> Any {
-        Any::Advice(advice)
-    }
-}
-
-impl From<Fixed> for Any {
-    fn from(_: Fixed) -> Any {
-        Any::Fixed
-    }
-}
-
-impl From<Instance> for Any {
-    fn from(_: Instance) -> Any {
-        Any::Instance
-    }
-}
-
-impl From<Column<Advice>> for Column<Any> {
-    fn from(advice: Column<Advice>) -> Column<Any> {
-        Column {
-            index: advice.index(),
-            column_type: Any::Advice(advice.column_type),
-        }
-    }
-}
-
-impl From<Column<Fixed>> for Column<Any> {
-    fn from(advice: Column<Fixed>) -> Column<Any> {
-        Column {
-            index: advice.index(),
-            column_type: Any::Fixed,
-        }
-    }
-}
-
-impl From<Column<Instance>> for Column<Any> {
-    fn from(advice: Column<Instance>) -> Column<Any> {
-        Column {
-            index: advice.index(),
-            column_type: Any::Instance,
-        }
-    }
-}
-
-impl TryFrom<Column<Any>> for Column<Advice> {
-    type Error = &'static str;
-
-    fn try_from(any: Column<Any>) -> Result<Self, Self::Error> {
-        match any.column_type() {
-            Any::Advice(advice) => Ok(Column {
-                index: any.index(),
-                column_type: *advice,
-            }),
-            _ => Err("Cannot convert into Column<Advice>"),
-        }
-    }
-}
-
-impl TryFrom<Column<Any>> for Column<Fixed> {
-    type Error = &'static str;
-
-    fn try_from(any: Column<Any>) -> Result<Self, Self::Error> {
-        match any.column_type() {
-            Any::Fixed => Ok(Column {
-                index: any.index(),
-                column_type: Fixed,
-            }),
-            _ => Err("Cannot convert into Column<Fixed>"),
-        }
-    }
-}
-
-impl TryFrom<Column<Any>> for Column<Instance> {
-    type Error = &'static str;
-
-    fn try_from(any: Column<Any>) -> Result<Self, Self::Error> {
-        match any.column_type() {
-            Any::Instance => Ok(Column {
-                index: any.index(),
-                column_type: Instance,
-            }),
-            _ => Err("Cannot convert into Column<Instance>"),
-        }
-    }
-}
-
-/// A selector, representing a fixed boolean value per row of the circuit.
-///
-/// Selectors can be used to conditionally enable (portions of) gates:
-/// ```
-/// use halo2_proofs::poly::Rotation;
-/// # use halo2curves::pasta::Fp;
-/// # use halo2_proofs::plonk::ConstraintSystem;
-///
-/// # let mut meta = ConstraintSystem::<Fp>::default();
-/// let a = meta.advice_column();
-/// let b = meta.advice_column();
-/// let s = meta.selector();
-///
-/// meta.create_gate("foo", |meta| {
-///     let a = meta.query_advice(a, Rotation::prev());
-///     let b = meta.query_advice(b, Rotation::cur());
-///     let s = meta.query_selector(s);
-///
-///     // On rows where the selector is enabled, a is constrained to equal b.
-///     // On rows where the selector is disabled, a and b can take any value.
-///     vec![s * (a - b)]
-/// });
-/// ```
-///
-/// Selectors are disabled on all rows by default, and must be explicitly enabled on each
-/// row when required:
-/// ```
-/// use halo2_proofs::{
-///     circuit::{Chip, Layouter, Value},
-///     plonk::{Advice, Column, Error, Selector},
-/// };
-/// use ff::Field;
-/// # use halo2_proofs::plonk::Fixed;
-///
-/// struct Config {
-///     a: Column<Advice>,
-///     b: Column<Advice>,
-///     s: Selector,
-/// }
-///
-/// fn circuit_logic<F: Field, C: Chip<F>>(chip: C, mut layouter: impl Layouter<F>) -> Result<(), Error> {
-///     let config = chip.config();
-///     # let config: Config = todo!();
-///     layouter.assign_region(|| "bar", |mut region| {
-///         region.assign_advice(|| "a", config.a, 0, || Value::known(F::ONE))?;
-///         region.assign_advice(|| "a", config.b, 1, || Value::known(F::ONE))?;
-///         config.s.enable(&mut region, 1)
-///     })?;
-///     Ok(())
-/// }
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Selector(pub(crate) usize, bool);
-
-impl Selector {
-    /// Enable this selector at the given offset within the given region.
-    pub fn enable<F: Field>(&self, region: &mut Region<F>, offset: usize) -> Result<(), Error> {
-        region.enable_selector(|| "", self, offset)
-    }
-
-    /// Is this selector "simple"? Simple selectors can only be multiplied
-    /// by expressions that contain no other simple selectors.
-    pub fn is_simple(&self) -> bool {
-        self.1
-    }
-
-    /// Returns index of this selector
-    pub fn index(&self) -> usize {
-        self.0
-    }
-
-    /// Return expression from selector
-    pub fn expr<F: Field>(&self) -> Expression<F> {
-        Expression::Selector(*self)
-    }
-}
-
-/// Query of fixed column at a certain relative location
-#[derive(Copy, Clone, Debug)]
-pub struct FixedQuery {
-    /// Query index
-    pub(crate) index: Option<usize>,
-    /// Column index
-    pub(crate) column_index: usize,
-    /// Rotation of this query
-    pub(crate) rotation: Rotation,
-}
-
-impl FixedQuery {
-    /// Column index
-    pub fn column_index(&self) -> usize {
-        self.column_index
-    }
-
-    /// Rotation of this query
-    pub fn rotation(&self) -> Rotation {
-        self.rotation
-    }
-}
-
-/// Query of advice column at a certain relative location
-#[derive(Copy, Clone, Debug)]
-pub struct AdviceQuery {
-    /// Query index
-    pub(crate) index: Option<usize>,
-    /// Column index
-    pub(crate) column_index: usize,
-    /// Rotation of this query
-    pub(crate) rotation: Rotation,
-    /// Phase of this advice column
-    pub(crate) phase: sealed::Phase,
-}
-
-impl AdviceQuery {
-    /// Column index
-    pub fn column_index(&self) -> usize {
-        self.column_index
-    }
-
-    /// Rotation of this query
-    pub fn rotation(&self) -> Rotation {
-        self.rotation
-    }
-
-    /// Phase of this advice column
-    pub fn phase(&self) -> u8 {
-        self.phase.0
-    }
-}
-
-/// Query of instance column at a certain relative location
-#[derive(Copy, Clone, Debug)]
-pub struct InstanceQuery {
-    /// Query index
-    pub(crate) index: Option<usize>,
-    /// Column index
-    pub(crate) column_index: usize,
-    /// Rotation of this query
-    pub(crate) rotation: Rotation,
-}
-
-impl InstanceQuery {
-    /// Column index
-    pub fn column_index(&self) -> usize {
-        self.column_index
-    }
-
-    /// Rotation of this query
-    pub fn rotation(&self) -> Rotation {
-        self.rotation
-    }
-}
-
-/// A fixed column of a lookup table.
-///
-/// A lookup table can be loaded into this column via [`Layouter::assign_table`]. Columns
-/// can currently only contain a single table, but they may be used in multiple lookup
-/// arguments via [`ConstraintSystem::lookup`].
-///
-/// Lookup table columns are always "encumbered" by the lookup arguments they are used in;
-/// they cannot simultaneously be used as general fixed columns.
-///
-/// [`Layouter::assign_table`]: crate::circuit::Layouter::assign_table
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct TableColumn {
-    /// The fixed column that this table column is stored in.
+impl<F: Field> AssignedCell<Assigned<F>, F> {
+    /// Evaluates this assigned cell's value directly, performing an unbatched inversion
+    /// if necessary.
     ///
-    /// # Security
-    ///
-    /// This inner column MUST NOT be exposed in the public API, or else chip developers
-    /// can load lookup tables into their circuits without default-value-filling the
-    /// columns, which can cause soundness bugs.
-    inner: Column<Fixed>,
-}
-
-impl TableColumn {
-    pub(crate) fn inner(&self) -> Column<Fixed> {
-        self.inner
+    /// If the denominator is zero, the returned cell's value is zero.
+    pub fn evaluate(self) -> AssignedCell<F, F> {
+        AssignedCell {
+            value: self.value.evaluate(),
+            cell: self.cell,
+            _marker: Default::default(),
+        }
     }
 }
 
-/// A challenge squeezed from transcript after advice columns at the phase have been committed.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct Challenge {
-    index: usize,
-    pub(crate) phase: sealed::Phase,
-}
-
-impl Challenge {
-    /// Index of this challenge.
-    pub fn index(&self) -> usize {
-        self.index
-    }
-
-    /// Phase of this challenge.
-    pub fn phase(&self) -> u8 {
-        self.phase.0
-    }
-
-    /// Return Expression
-    pub fn expr<F: Field>(&self) -> Expression<F> {
-        Expression::Challenge(*self)
-    }
-}
-
-/// This trait allows a [`Circuit`] to direct some backend to assign a witness
-/// for a constraint system.
-pub trait Assignment<F: Field> {
-    /// Creates a new region and enters into it.
+impl<V: Clone, F: Field> AssignedCell<V, F>
+where
+    for<'v> Assigned<F>: From<&'v V>,
+{
+    /// Copies the value to a given advice cell and constrains them to be equal.
     ///
-    /// Panics if we are currently in a region (if `exit_region` was not called).
-    ///
-    /// Not intended for downstream consumption; use [`Layouter::assign_region`] instead.
-    ///
-    /// [`Layouter::assign_region`]: crate::circuit::Layouter#method.assign_region
-    fn enter_region<NR, N>(&mut self, name_fn: N)
+    /// Returns an error if either this cell or the given cell are in columns
+    /// where equality has not been enabled.
+    pub fn copy_advice<A, AR>(
+        &self,
+        annotation: A,
+        region: &mut Region<'_, F>,
+        column: Column<Advice>,
+        offset: usize,
+    ) -> Result<Self, Error>
     where
-        NR: Into<String>,
-        N: FnOnce() -> NR;
+        A: Fn() -> AR,
+        AR: Into<String>,
+    {
+        let assigned_cell =
+            region.assign_advice(annotation, column, offset, || self.value.clone())?;
+        region.constrain_equal(assigned_cell.cell(), self.cell())?;
 
-    /// Allows the developer to include an annotation for an specific column within a `Region`.
-    ///
-    /// This is usually useful for debugging circuit failures.
-    fn annotate_column<A, AR>(&mut self, annotation: A, column: Column<Any>)
-    where
-        A: FnOnce() -> AR,
-        AR: Into<String>;
+        Ok(assigned_cell)
+    }
+}
 
-    /// Exits the current region.
-    ///
-    /// Panics if we are not currently in a region (if `enter_region` was not called).
-    ///
-    /// Not intended for downstream consumption; use [`Layouter::assign_region`] instead.
-    ///
-    /// [`Layouter::assign_region`]: crate::circuit::Layouter#method.assign_region
-    fn exit_region(&mut self);
+/// A region of the circuit in which a [`Chip`] can assign cells.
+///
+/// Inside a region, the chip may freely use relative offsets; the [`Layouter`] will
+/// treat these assignments as a single "region" within the circuit.
+///
+/// The [`Layouter`] is allowed to optimise between regions as it sees fit. Chips must use
+/// [`Region::constrain_equal`] to copy in variables assigned in other regions.
+///
+/// TODO: It would be great if we could constrain the columns in these types to be
+/// "logical" columns that are guaranteed to correspond to the chip (and have come from
+/// `Chip::Config`).
+#[derive(Debug)]
+pub struct Region<'r, F: Field> {
+    region: &'r mut dyn layouter::RegionLayouter<F>,
+}
 
-    /// Enables a selector at the given row.
-    fn enable_selector<A, AR>(
+impl<'r, F: Field> From<&'r mut dyn layouter::RegionLayouter<F>> for Region<'r, F> {
+    fn from(region: &'r mut dyn layouter::RegionLayouter<F>) -> Self {
+        Region { region }
+    }
+}
+
+impl<'r, F: Field> Region<'r, F> {
+    /// Enables a selector at the given offset.
+    pub(crate) fn enable_selector<A, AR>(
         &mut self,
         annotation: A,
         selector: &Selector,
-        row: usize,
+        offset: usize,
     ) -> Result<(), Error>
     where
-        A: FnOnce() -> AR,
-        AR: Into<String>;
+        A: Fn() -> AR,
+        AR: Into<String>,
+    {
+        self.region
+            .enable_selector(&|| annotation().into(), selector, offset)
+    }
 
-    /// Queries the cell of an instance column at a particular absolute row.
+    /// Allows the circuit implementor to name/annotate a Column within a Region context.
     ///
-    /// Returns the cell's value, if known.
-    fn query_instance(&self, column: Column<Instance>, row: usize) -> Result<Value<F>, Error>;
+    /// This is useful in order to improve the amount of information that `prover.verify()`
+    /// and `prover.assert_satisfied()` can provide.
+    pub fn name_column<A, AR, T>(&mut self, annotation: A, column: T)
+    where
+        A: Fn() -> AR,
+        AR: Into<String>,
+        T: Into<Column<Any>>,
+    {
+        self.region
+            .name_column(&|| annotation().into(), column.into());
+    }
 
-    /// Assign an advice column value (witness)
-    fn assign_advice<V, VR, A, AR>(
+    /// Assign an advice column value (witness).
+    ///
+    /// Even though `to` has `FnMut` bounds, it is guaranteed to be called at most once.
+    pub fn assign_advice<'v, V, VR, A, AR>(
+        &'v mut self,
+        annotation: A,
+        column: Column<Advice>,
+        offset: usize,
+        mut to: V,
+    ) -> Result<AssignedCell<VR, F>, Error>
+    where
+        V: FnMut() -> Value<VR> + 'v,
+        for<'vr> Assigned<F>: From<&'vr VR>,
+        A: Fn() -> AR,
+        AR: Into<String>,
+    {
+        let mut value = Value::unknown();
+        let cell =
+            self.region
+                .assign_advice(&|| annotation().into(), column, offset, &mut || {
+                    let v = to();
+                    let value_f = v.to_field();
+                    value = v;
+                    value_f
+                })?;
+
+        Ok(AssignedCell {
+            value,
+            cell,
+            _marker: PhantomData,
+        })
+    }
+
+    /// Assigns a constant value to the column `advice` at `offset` within this region.
+    ///
+    /// The constant value will be assigned to a cell within one of the fixed columns
+    /// configured via `ConstraintSystem::enable_constant`.
+    ///
+    /// Returns the advice cell.
+    pub fn assign_advice_from_constant<VR, A, AR>(
         &mut self,
         annotation: A,
         column: Column<Advice>,
-        row: usize,
-        to: V,
-    ) -> Result<(), Error>
+        offset: usize,
+        constant: VR,
+    ) -> Result<AssignedCell<VR, F>, Error>
     where
-        V: FnOnce() -> Value<VR>,
-        VR: Into<Assigned<F>>,
-        A: FnOnce() -> AR,
-        AR: Into<String>;
+        for<'vr> Assigned<F>: From<&'vr VR>,
+        A: Fn() -> AR,
+        AR: Into<String>,
+    {
+        let cell = self.region.assign_advice_from_constant(
+            &|| annotation().into(),
+            column,
+            offset,
+            (&constant).into(),
+        )?;
 
-    /// Assign a fixed value
-    fn assign_fixed<V, VR, A, AR>(
+        Ok(AssignedCell {
+            value: Value::known(constant),
+            cell,
+            _marker: PhantomData,
+        })
+    }
+
+    /// Assign the value of the instance column's cell at absolute location
+    /// `row` to the column `advice` at `offset` within this region.
+    ///
+    /// Returns the advice cell, and its value if known.
+    pub fn assign_advice_from_instance<A, AR>(
         &mut self,
         annotation: A,
-        column: Column<Fixed>,
+        instance: Column<Instance>,
         row: usize,
-        to: V,
+        advice: Column<Advice>,
+        offset: usize,
+    ) -> Result<AssignedCell<F, F>, Error>
+    where
+        A: Fn() -> AR,
+        AR: Into<String>,
+    {
+        let (cell, value) = self.region.assign_advice_from_instance(
+            &|| annotation().into(),
+            instance,
+            row,
+            advice,
+            offset,
+        )?;
+
+        Ok(AssignedCell {
+            value,
+            cell,
+            _marker: PhantomData,
+        })
+    }
+
+    /// Assign a fixed value.
+    ///
+    /// Even though `to` has `FnMut` bounds, it is guaranteed to be called at most once.
+    pub fn assign_fixed<'v, V, VR, A, AR>(
+        &'v mut self,
+        annotation: A,
+        column: Column<Fixed>,
+        offset: usize,
+        mut to: V,
+    ) -> Result<AssignedCell<VR, F>, Error>
+    where
+        V: FnMut() -> Value<VR> + 'v,
+        for<'vr> Assigned<F>: From<&'vr VR>,
+        A: Fn() -> AR,
+        AR: Into<String>,
+    {
+        let mut value = Value::unknown();
+        let cell =
+            self.region
+                .assign_fixed(&|| annotation().into(), column, offset, &mut || {
+                    let v = to();
+                    let value_f = v.to_field();
+                    value = v;
+                    value_f
+                })?;
+
+        Ok(AssignedCell {
+            value,
+            cell,
+            _marker: PhantomData,
+        })
+    }
+
+    /// Constrains a cell to have a constant value.
+    ///
+    /// Returns an error if the cell is in a column where equality has not been enabled.
+    pub fn constrain_constant<VR>(&mut self, cell: Cell, constant: VR) -> Result<(), Error>
+    where
+        VR: Into<Assigned<F>>,
+    {
+        self.region.constrain_constant(cell, constant.into())
+    }
+
+    /// Constrains two cells to have the same value.
+    ///
+    /// Returns an error if either of the cells are in columns where equality
+    /// has not been enabled.
+    pub fn constrain_equal(&mut self, left: Cell, right: Cell) -> Result<(), Error> {
+        self.region.constrain_equal(left, right)
+    }
+}
+
+/// A lookup table in the circuit.
+#[derive(Debug)]
+pub struct Table<'r, F: Field> {
+    table: &'r mut dyn layouter::TableLayouter<F>,
+}
+
+impl<'r, F: Field> From<&'r mut dyn layouter::TableLayouter<F>> for Table<'r, F> {
+    fn from(table: &'r mut dyn layouter::TableLayouter<F>) -> Self {
+        Table { table }
+    }
+}
+
+impl<'r, F: Field> Table<'r, F> {
+    /// Assigns a fixed value to a table cell.
+    ///
+    /// Returns an error if the table cell has already been assigned to.
+    ///
+    /// Even though `to` has `FnMut` bounds, it is guaranteed to be called at most once.
+    pub fn assign_cell<'v, V, VR, A, AR>(
+        &'v mut self,
+        annotation: A,
+        column: TableColumn,
+        offset: usize,
+        mut to: V,
     ) -> Result<(), Error>
     where
-        V: FnOnce() -> Value<VR>,
+        V: FnMut() -> Value<VR> + 'v,
         VR: Into<Assigned<F>>,
-        A: FnOnce() -> AR,
-        AR: Into<String>;
+        A: Fn() -> AR,
+        AR: Into<String>,
+    {
+        self.table
+            .assign_cell(&|| annotation().into(), column, offset, &mut || {
+                to().into_field()
+            })
+    }
+}
 
-    /// Assign two cells to have the same value
-    fn copy(
-        &mut self,
-        left_column: Column<Any>,
-        left_row: usize,
-        right_column: Column<Any>,
-        right_row: usize,
-    ) -> Result<(), Error>;
+/// A layout strategy within a circuit. The layouter is chip-agnostic and applies its
+/// strategy to the context and config it is given.
+///
+/// This abstracts over the circuit assignments, handling row indices etc.
+///
+pub trait Layouter<F: Field> {
+    /// Represents the type of the "root" of this layouter, so that nested namespaces
+    /// can minimize indirection.
+    type Root: Layouter<F>;
 
-    /// Fills a fixed `column` starting from the given `row` with value `to`.
-    fn fill_from_row(
+    /// Assign a region of gates to an absolute row number.
+    ///
+    /// Inside the closure, the chip may freely use relative offsets; the `Layouter` will
+    /// treat these assignments as a single "region" within the circuit. Outside this
+    /// closure, the `Layouter` is allowed to optimise as it sees fit.
+    ///
+    /// ```ignore
+    /// fn assign_region(&mut self, || "region name", |region| {
+    ///     let config = chip.config();
+    ///     region.assign_advice(config.a, offset, || { Some(value)});
+    /// });
+    /// ```
+    fn assign_region<A, AR, N, NR>(&mut self, name: N, assignment: A) -> Result<AR, Error>
+    where
+        A: FnMut(Region<'_, F>) -> Result<AR, Error>,
+        N: Fn() -> NR,
+        NR: Into<String>;
+
+    /// Assign a table region to an absolute row number.
+    ///
+    /// ```ignore
+    /// fn assign_table(&mut self, || "table name", |table| {
+    ///     let config = chip.config();
+    ///     table.assign_fixed(config.a, offset, || { Some(value)});
+    /// });
+    /// ```
+    fn assign_table<A, N, NR>(&mut self, name: N, assignment: A) -> Result<(), Error>
+    where
+        A: FnMut(Table<'_, F>) -> Result<(), Error>,
+        N: Fn() -> NR,
+        NR: Into<String>;
+
+    /// Constrains a [`Cell`] to equal an instance column's row value at an
+    /// absolute position.
+    fn constrain_instance(
         &mut self,
-        column: Column<Fixed>,
+        cell: Cell,
+        column: Column<Instance>,
         row: usize,
-        to: Value<Assigned<F>>,
     ) -> Result<(), Error>;
 
     /// Queries the value of the given challenge.
@@ -704,11 +460,14 @@ pub trait Assignment<F: Field> {
     /// Returns `Value::unknown()` if the current synthesis phase is before the challenge can be queried.
     fn get_challenge(&self, challenge: Challenge) -> Value<F>;
 
+    /// Gets the "root" of this assignment, bypassing the namespacing.
+    ///
+    /// Not intended for downstream consumption; use [`Layouter::namespace`] instead.
+    fn get_root(&mut self) -> &mut Self::Root;
+
     /// Creates a new (sub)namespace and enters into it.
     ///
     /// Not intended for downstream consumption; use [`Layouter::namespace`] instead.
-    ///
-    /// [`Layouter::namespace`]: crate::circuit::Layouter#method.namespace
     fn push_namespace<NR, N>(&mut self, name_fn: N)
     where
         NR: Into<String>,
@@ -717,1818 +476,105 @@ pub trait Assignment<F: Field> {
     /// Exits out of the existing namespace.
     ///
     /// Not intended for downstream consumption; use [`Layouter::namespace`] instead.
-    ///
-    /// [`Layouter::namespace`]: crate::circuit::Layouter#method.namespace
     fn pop_namespace(&mut self, gadget_name: Option<String>);
-}
 
-/// A floor planning strategy for a circuit.
-///
-/// The floor planner is chip-agnostic and applies its strategy to the circuit it is used
-/// within.
-pub trait FloorPlanner {
-    /// Given the provided `cs`, synthesize the given circuit.
-    ///
-    /// `constants` is the list of fixed columns that the layouter may use to assign
-    /// global constant values. These columns will all have been equality-enabled.
-    ///
-    /// Internally, a floor planner will perform the following operations:
-    /// - Instantiate a [`Layouter`] for this floor planner.
-    /// - Perform any necessary setup or measurement tasks, which may involve one or more
-    ///   calls to `Circuit::default().synthesize(config, &mut layouter)`.
-    /// - Call `circuit.synthesize(config, &mut layouter)` exactly once.
-    fn synthesize<F: Field, CS: Assignment<F> + SyncDeps, C: Circuit<F>>(
-        cs: &mut CS,
-        circuit: &C,
-        config: C::Config,
-        constants: Vec<Column<Fixed>>,
-    ) -> Result<(), Error>;
-}
-
-/// This is a trait that circuits provide implementations for so that the
-/// backend prover can ask the circuit to synthesize using some given
-/// [`ConstraintSystem`] implementation.
-pub trait Circuit<F: Field> {
-    /// This is a configuration object that stores things like columns.
-    type Config: Clone;
-    /// The floor planner used for this circuit. This is an associated type of the
-    /// `Circuit` trait because its behaviour is circuit-critical.
-    type FloorPlanner: FloorPlanner;
-    /// Optional circuit configuration parameters. Requires the `circuit-params` feature.
-    #[cfg(feature = "circuit-params")]
-    type Params: Default;
-
-    /// Returns a copy of this circuit with no witness values (i.e. all witnesses set to
-    /// `None`). For most circuits, this will be equal to `Self::default()`.
-    fn without_witnesses(&self) -> Self;
-
-    /// Returns a reference to the parameters that should be used to configure the circuit.
-    /// Requires the `circuit-params` feature.
-    #[cfg(feature = "circuit-params")]
-    fn params(&self) -> Self::Params {
-        Self::Params::default()
-    }
-
-    /// The circuit is given an opportunity to describe the exact gate
-    /// arrangement, column arrangement, etc.  Takes a runtime parameter.  The default
-    /// implementation calls `configure` ignoring the `_params` argument in order to easily support
-    /// circuits that don't use configuration parameters.
-    #[cfg(feature = "circuit-params")]
-    fn configure_with_params(
-        meta: &mut ConstraintSystem<F>,
-        _params: Self::Params,
-    ) -> Self::Config {
-        Self::configure(meta)
-    }
-
-    /// The circuit is given an opportunity to describe the exact gate
-    /// arrangement, column arrangement, etc.
-    fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config;
-
-    /// Given the provided `cs`, synthesize the circuit. The concrete type of
-    /// the caller will be different depending on the context, and they may or
-    /// may not expect to have a witness present.
-    fn synthesize(&self, config: Self::Config, layouter: impl Layouter<F>) -> Result<(), Error>;
-}
-
-/// Low-degree expression representing an identity that must hold over the committed columns.
-#[derive(Clone)]
-pub enum Expression<F> {
-    /// This is a constant polynomial
-    Constant(F),
-    /// This is a virtual selector
-    Selector(Selector),
-    /// This is a fixed column queried at a certain relative location
-    Fixed(FixedQuery),
-    /// This is an advice (witness) column queried at a certain relative location
-    Advice(AdviceQuery),
-    /// This is an instance (external) column queried at a certain relative location
-    Instance(InstanceQuery),
-    /// This is a challenge
-    Challenge(Challenge),
-    /// This is a negated polynomial
-    Negated(Box<Expression<F>>),
-    /// This is the sum of two polynomials
-    Sum(Box<Expression<F>>, Box<Expression<F>>),
-    /// This is the product of two polynomials
-    Product(Box<Expression<F>>, Box<Expression<F>>),
-    /// This is a scaled polynomial
-    Scaled(Box<Expression<F>>, F),
-}
-
-impl<F: Field> Expression<F> {
-    /// Make side effects
-    pub fn query_cells(&mut self, cells: &mut VirtualCells<'_, F>) {
-        match self {
-            Expression::Constant(_) => (),
-            Expression::Selector(selector) => {
-                if !cells.queried_selectors.contains(selector) {
-                    cells.queried_selectors.push(*selector);
-                }
-            }
-            Expression::Fixed(query) => {
-                if query.index.is_none() {
-                    let col = Column {
-                        index: query.column_index,
-                        column_type: Fixed,
-                    };
-                    cells.queried_cells.push((col, query.rotation).into());
-                    query.index = Some(cells.meta.query_fixed_index(col, query.rotation));
-                }
-            }
-            Expression::Advice(query) => {
-                if query.index.is_none() {
-                    let col = Column {
-                        index: query.column_index,
-                        column_type: Advice { phase: query.phase },
-                    };
-                    cells.queried_cells.push((col, query.rotation).into());
-                    query.index = Some(cells.meta.query_advice_index(col, query.rotation));
-                }
-            }
-            Expression::Instance(query) => {
-                if query.index.is_none() {
-                    let col = Column {
-                        index: query.column_index,
-                        column_type: Instance,
-                    };
-                    cells.queried_cells.push((col, query.rotation).into());
-                    query.index = Some(cells.meta.query_instance_index(col, query.rotation));
-                }
-            }
-            Expression::Challenge(_) => (),
-            Expression::Negated(a) => a.query_cells(cells),
-            Expression::Sum(a, b) => {
-                a.query_cells(cells);
-                b.query_cells(cells);
-            }
-            Expression::Product(a, b) => {
-                a.query_cells(cells);
-                b.query_cells(cells);
-            }
-            Expression::Scaled(a, _) => a.query_cells(cells),
-        };
-    }
-
-    /// Evaluate the polynomial using the provided closures to perform the
-    /// operations.
-    pub fn evaluate<T>(
-        &self,
-        constant: &impl Fn(F) -> T,
-        selector_column: &impl Fn(Selector) -> T,
-        fixed_column: &impl Fn(FixedQuery) -> T,
-        advice_column: &impl Fn(AdviceQuery) -> T,
-        instance_column: &impl Fn(InstanceQuery) -> T,
-        challenge: &impl Fn(Challenge) -> T,
-        negated: &impl Fn(T) -> T,
-        sum: &impl Fn(T, T) -> T,
-        product: &impl Fn(T, T) -> T,
-        scaled: &impl Fn(T, F) -> T,
-    ) -> T {
-        match self {
-            Expression::Constant(scalar) => constant(*scalar),
-            Expression::Selector(selector) => selector_column(*selector),
-            Expression::Fixed(query) => fixed_column(*query),
-            Expression::Advice(query) => advice_column(*query),
-            Expression::Instance(query) => instance_column(*query),
-            Expression::Challenge(value) => challenge(*value),
-            Expression::Negated(a) => {
-                let a = a.evaluate(
-                    constant,
-                    selector_column,
-                    fixed_column,
-                    advice_column,
-                    instance_column,
-                    challenge,
-                    negated,
-                    sum,
-                    product,
-                    scaled,
-                );
-                negated(a)
-            }
-            Expression::Sum(a, b) => {
-                let a = a.evaluate(
-                    constant,
-                    selector_column,
-                    fixed_column,
-                    advice_column,
-                    instance_column,
-                    challenge,
-                    negated,
-                    sum,
-                    product,
-                    scaled,
-                );
-                let b = b.evaluate(
-                    constant,
-                    selector_column,
-                    fixed_column,
-                    advice_column,
-                    instance_column,
-                    challenge,
-                    negated,
-                    sum,
-                    product,
-                    scaled,
-                );
-                sum(a, b)
-            }
-            Expression::Product(a, b) => {
-                let a = a.evaluate(
-                    constant,
-                    selector_column,
-                    fixed_column,
-                    advice_column,
-                    instance_column,
-                    challenge,
-                    negated,
-                    sum,
-                    product,
-                    scaled,
-                );
-                let b = b.evaluate(
-                    constant,
-                    selector_column,
-                    fixed_column,
-                    advice_column,
-                    instance_column,
-                    challenge,
-                    negated,
-                    sum,
-                    product,
-                    scaled,
-                );
-                product(a, b)
-            }
-            Expression::Scaled(a, f) => {
-                let a = a.evaluate(
-                    constant,
-                    selector_column,
-                    fixed_column,
-                    advice_column,
-                    instance_column,
-                    challenge,
-                    negated,
-                    sum,
-                    product,
-                    scaled,
-                );
-                scaled(a, *f)
-            }
-        }
-    }
-
-    /// Evaluate the polynomial lazily using the provided closures to perform the
-    /// operations.
-    pub fn evaluate_lazy<T: PartialEq>(
-        &self,
-        constant: &impl Fn(F) -> T,
-        selector_column: &impl Fn(Selector) -> T,
-        fixed_column: &impl Fn(FixedQuery) -> T,
-        advice_column: &impl Fn(AdviceQuery) -> T,
-        instance_column: &impl Fn(InstanceQuery) -> T,
-        challenge: &impl Fn(Challenge) -> T,
-        negated: &impl Fn(T) -> T,
-        sum: &impl Fn(T, T) -> T,
-        product: &impl Fn(T, T) -> T,
-        scaled: &impl Fn(T, F) -> T,
-        zero: &T,
-    ) -> T {
-        match self {
-            Expression::Constant(scalar) => constant(*scalar),
-            Expression::Selector(selector) => selector_column(*selector),
-            Expression::Fixed(query) => fixed_column(*query),
-            Expression::Advice(query) => advice_column(*query),
-            Expression::Instance(query) => instance_column(*query),
-            Expression::Challenge(value) => challenge(*value),
-            Expression::Negated(a) => {
-                let a = a.evaluate_lazy(
-                    constant,
-                    selector_column,
-                    fixed_column,
-                    advice_column,
-                    instance_column,
-                    challenge,
-                    negated,
-                    sum,
-                    product,
-                    scaled,
-                    zero,
-                );
-                negated(a)
-            }
-            Expression::Sum(a, b) => {
-                let a = a.evaluate_lazy(
-                    constant,
-                    selector_column,
-                    fixed_column,
-                    advice_column,
-                    instance_column,
-                    challenge,
-                    negated,
-                    sum,
-                    product,
-                    scaled,
-                    zero,
-                );
-                let b = b.evaluate_lazy(
-                    constant,
-                    selector_column,
-                    fixed_column,
-                    advice_column,
-                    instance_column,
-                    challenge,
-                    negated,
-                    sum,
-                    product,
-                    scaled,
-                    zero,
-                );
-                sum(a, b)
-            }
-            Expression::Product(a, b) => {
-                let (a, b) = if a.complexity() <= b.complexity() {
-                    (a, b)
-                } else {
-                    (b, a)
-                };
-                let a = a.evaluate_lazy(
-                    constant,
-                    selector_column,
-                    fixed_column,
-                    advice_column,
-                    instance_column,
-                    challenge,
-                    negated,
-                    sum,
-                    product,
-                    scaled,
-                    zero,
-                );
-
-                if a == *zero {
-                    a
-                } else {
-                    let b = b.evaluate_lazy(
-                        constant,
-                        selector_column,
-                        fixed_column,
-                        advice_column,
-                        instance_column,
-                        challenge,
-                        negated,
-                        sum,
-                        product,
-                        scaled,
-                        zero,
-                    );
-                    product(a, b)
-                }
-            }
-            Expression::Scaled(a, f) => {
-                let a = a.evaluate_lazy(
-                    constant,
-                    selector_column,
-                    fixed_column,
-                    advice_column,
-                    instance_column,
-                    challenge,
-                    negated,
-                    sum,
-                    product,
-                    scaled,
-                    zero,
-                );
-                scaled(a, *f)
-            }
-        }
-    }
-
-    fn write_identifier<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        match self {
-            Expression::Constant(scalar) => write!(writer, "{:?}", scalar),
-            Expression::Selector(selector) => write!(writer, "selector[{}]", selector.0),
-            Expression::Fixed(query) => {
-                write!(
-                    writer,
-                    "fixed[{}][{}]",
-                    query.column_index, query.rotation.0
-                )
-            }
-            Expression::Advice(query) => {
-                write!(
-                    writer,
-                    "advice[{}][{}]",
-                    query.column_index, query.rotation.0
-                )
-            }
-            Expression::Instance(query) => {
-                write!(
-                    writer,
-                    "instance[{}][{}]",
-                    query.column_index, query.rotation.0
-                )
-            }
-            Expression::Challenge(challenge) => {
-                write!(writer, "challenge[{}]", challenge.index())
-            }
-            Expression::Negated(a) => {
-                writer.write_all(b"(-")?;
-                a.write_identifier(writer)?;
-                writer.write_all(b")")
-            }
-            Expression::Sum(a, b) => {
-                writer.write_all(b"(")?;
-                a.write_identifier(writer)?;
-                writer.write_all(b"+")?;
-                b.write_identifier(writer)?;
-                writer.write_all(b")")
-            }
-            Expression::Product(a, b) => {
-                writer.write_all(b"(")?;
-                a.write_identifier(writer)?;
-                writer.write_all(b"*")?;
-                b.write_identifier(writer)?;
-                writer.write_all(b")")
-            }
-            Expression::Scaled(a, f) => {
-                a.write_identifier(writer)?;
-                write!(writer, "*{:?}", f)
-            }
-        }
-    }
-
-    /// Identifier for this expression. Expressions with identical identifiers
-    /// do the same calculation (but the expressions don't need to be exactly equal
-    /// in how they are composed e.g. `1 + 2` and `2 + 1` can have the same identifier).
-    pub fn identifier(&self) -> String {
-        let mut cursor = std::io::Cursor::new(Vec::new());
-        self.write_identifier(&mut cursor).unwrap();
-        String::from_utf8(cursor.into_inner()).unwrap()
-    }
-
-    /// Compute the degree of this polynomial
-    pub fn degree(&self) -> usize {
-        match self {
-            Expression::Constant(_) => 0,
-            Expression::Selector(_) => 1,
-            Expression::Fixed(_) => 1,
-            Expression::Advice(_) => 1,
-            Expression::Instance(_) => 1,
-            Expression::Challenge(_) => 0,
-            Expression::Negated(poly) => poly.degree(),
-            Expression::Sum(a, b) => max(a.degree(), b.degree()),
-            Expression::Product(a, b) => a.degree() + b.degree(),
-            Expression::Scaled(poly, _) => poly.degree(),
-        }
-    }
-
-    /// Approximate the computational complexity of this expression.
-    pub fn complexity(&self) -> usize {
-        match self {
-            Expression::Constant(_) => 0,
-            Expression::Selector(_) => 1,
-            Expression::Fixed(_) => 1,
-            Expression::Advice(_) => 1,
-            Expression::Instance(_) => 1,
-            Expression::Challenge(_) => 0,
-            Expression::Negated(poly) => poly.complexity() + 5,
-            Expression::Sum(a, b) => a.complexity() + b.complexity() + 15,
-            Expression::Product(a, b) => a.complexity() + b.complexity() + 30,
-            Expression::Scaled(poly, _) => poly.complexity() + 30,
-        }
-    }
-
-    /// Square this expression.
-    pub fn square(self) -> Self {
-        self.clone() * self
-    }
-
-    /// Returns whether or not this expression contains a simple `Selector`.
-    fn contains_simple_selector(&self) -> bool {
-        self.evaluate(
-            &|_| false,
-            &|selector| selector.is_simple(),
-            &|_| false,
-            &|_| false,
-            &|_| false,
-            &|_| false,
-            &|a| a,
-            &|a, b| a || b,
-            &|a, b| a || b,
-            &|a, _| a,
-        )
-    }
-
-    /// Extracts a simple selector from this gate, if present
-    fn extract_simple_selector(&self) -> Option<Selector> {
-        let op = |a, b| match (a, b) {
-            (Some(a), None) | (None, Some(a)) => Some(a),
-            (Some(_), Some(_)) => panic!("two simple selectors cannot be in the same expression"),
-            _ => None,
-        };
-
-        self.evaluate(
-            &|_| None,
-            &|selector| {
-                if selector.is_simple() {
-                    Some(selector)
-                } else {
-                    None
-                }
-            },
-            &|_| None,
-            &|_| None,
-            &|_| None,
-            &|_| None,
-            &|a| a,
-            &op,
-            &op,
-            &|a, _| a,
-        )
-    }
-}
-
-impl<F: std::fmt::Debug> std::fmt::Debug for Expression<F> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Expression::Constant(scalar) => f.debug_tuple("Constant").field(scalar).finish(),
-            Expression::Selector(selector) => f.debug_tuple("Selector").field(selector).finish(),
-            // Skip enum variant and print query struct directly to maintain backwards compatibility.
-            Expression::Fixed(query) => {
-                let mut debug_struct = f.debug_struct("Fixed");
-                match query.index {
-                    None => debug_struct.field("query_index", &query.index),
-                    Some(idx) => debug_struct.field("query_index", &idx),
-                };
-                debug_struct
-                    .field("column_index", &query.column_index)
-                    .field("rotation", &query.rotation)
-                    .finish()
-            }
-            Expression::Advice(query) => {
-                let mut debug_struct = f.debug_struct("Advice");
-                match query.index {
-                    None => debug_struct.field("query_index", &query.index),
-                    Some(idx) => debug_struct.field("query_index", &idx),
-                };
-                debug_struct
-                    .field("column_index", &query.column_index)
-                    .field("rotation", &query.rotation);
-                // Only show advice's phase if it's not in first phase.
-                if query.phase != FirstPhase.to_sealed() {
-                    debug_struct.field("phase", &query.phase);
-                }
-                debug_struct.finish()
-            }
-            Expression::Instance(query) => {
-                let mut debug_struct = f.debug_struct("Instance");
-                match query.index {
-                    None => debug_struct.field("query_index", &query.index),
-                    Some(idx) => debug_struct.field("query_index", &idx),
-                };
-                debug_struct
-                    .field("column_index", &query.column_index)
-                    .field("rotation", &query.rotation)
-                    .finish()
-            }
-            Expression::Challenge(challenge) => {
-                f.debug_tuple("Challenge").field(challenge).finish()
-            }
-            Expression::Negated(poly) => f.debug_tuple("Negated").field(poly).finish(),
-            Expression::Sum(a, b) => f.debug_tuple("Sum").field(a).field(b).finish(),
-            Expression::Product(a, b) => f.debug_tuple("Product").field(a).field(b).finish(),
-            Expression::Scaled(poly, scalar) => {
-                f.debug_tuple("Scaled").field(poly).field(scalar).finish()
-            }
-        }
-    }
-}
-
-impl<F: Field> Neg for Expression<F> {
-    type Output = Expression<F>;
-    fn neg(self) -> Self::Output {
-        Expression::Negated(Box::new(self))
-    }
-}
-
-impl<F: Field> Add for Expression<F> {
-    type Output = Expression<F>;
-    fn add(self, rhs: Expression<F>) -> Expression<F> {
-        if self.contains_simple_selector() || rhs.contains_simple_selector() {
-            panic!("attempted to use a simple selector in an addition");
-        }
-        Expression::Sum(Box::new(self), Box::new(rhs))
-    }
-}
-
-impl<F: Field> Sub for Expression<F> {
-    type Output = Expression<F>;
-    fn sub(self, rhs: Expression<F>) -> Expression<F> {
-        if self.contains_simple_selector() || rhs.contains_simple_selector() {
-            panic!("attempted to use a simple selector in a subtraction");
-        }
-        Expression::Sum(Box::new(self), Box::new(-rhs))
-    }
-}
-
-impl<F: Field> Mul for Expression<F> {
-    type Output = Expression<F>;
-    fn mul(self, rhs: Expression<F>) -> Expression<F> {
-        if self.contains_simple_selector() && rhs.contains_simple_selector() {
-            panic!("attempted to multiply two expressions containing simple selectors");
-        }
-        Expression::Product(Box::new(self), Box::new(rhs))
-    }
-}
-
-impl<F: Field> Mul<F> for Expression<F> {
-    type Output = Expression<F>;
-    fn mul(self, rhs: F) -> Expression<F> {
-        Expression::Scaled(Box::new(self), rhs)
-    }
-}
-
-/// Represents an index into a vector where each entry corresponds to a distinct
-/// point that polynomials are queried at.
-#[derive(Copy, Clone, Debug)]
-pub(crate) struct PointIndex(pub usize);
-
-/// A "virtual cell" is a PLONK cell that has been queried at a particular relative offset
-/// within a custom gate.
-#[derive(Clone, Debug)]
-pub struct VirtualCell {
-    pub(crate) column: Column<Any>,
-    pub(crate) rotation: Rotation,
-}
-
-impl<Col: Into<Column<Any>>> From<(Col, Rotation)> for VirtualCell {
-    fn from((column, rotation): (Col, Rotation)) -> Self {
-        VirtualCell {
-            column: column.into(),
-            rotation,
-        }
-    }
-}
-
-/// An individual polynomial constraint.
-///
-/// These are returned by the closures passed to `ConstraintSystem::create_gate`.
-#[derive(Debug)]
-pub struct Constraint<F: Field> {
-    name: String,
-    poly: Expression<F>,
-}
-
-impl<F: Field> From<Expression<F>> for Constraint<F> {
-    fn from(poly: Expression<F>) -> Self {
-        Constraint {
-            name: "".to_string(),
-            poly,
-        }
-    }
-}
-
-impl<F: Field, S: AsRef<str>> From<(S, Expression<F>)> for Constraint<F> {
-    fn from((name, poly): (S, Expression<F>)) -> Self {
-        Constraint {
-            name: name.as_ref().to_string(),
-            poly,
-        }
-    }
-}
-
-impl<F: Field> From<Expression<F>> for Vec<Constraint<F>> {
-    fn from(poly: Expression<F>) -> Self {
-        vec![Constraint {
-            name: "".to_string(),
-            poly,
-        }]
-    }
-}
-
-/// A set of polynomial constraints with a common selector.
-///
-/// ```
-/// use halo2_proofs::{plonk::{Constraints, Expression}, poly::Rotation};
-/// use halo2curves::pasta::Fp;
-/// # use halo2_proofs::plonk::ConstraintSystem;
-///
-/// # let mut meta = ConstraintSystem::<Fp>::default();
-/// let a = meta.advice_column();
-/// let b = meta.advice_column();
-/// let c = meta.advice_column();
-/// let s = meta.selector();
-///
-/// meta.create_gate("foo", |meta| {
-///     let next = meta.query_advice(a, Rotation::next());
-///     let a = meta.query_advice(a, Rotation::cur());
-///     let b = meta.query_advice(b, Rotation::cur());
-///     let c = meta.query_advice(c, Rotation::cur());
-///     let s_ternary = meta.query_selector(s);
-///
-///     let one_minus_a = Expression::Constant(Fp::one()) - a.clone();
-///
-///     Constraints::with_selector(
-///         s_ternary,
-///         std::array::IntoIter::new([
-///             ("a is boolean", a.clone() * one_minus_a.clone()),
-///             ("next == a ? b : c", next - (a * b + one_minus_a * c)),
-///         ]),
-///     )
-/// });
-/// ```
-///
-/// Note that the use of `std::array::IntoIter::new` is only necessary if you need to
-/// support Rust 1.51 or 1.52. If your minimum supported Rust version is 1.53 or greater,
-/// you can pass an array directly.
-#[derive(Debug)]
-pub struct Constraints<F: Field, C: Into<Constraint<F>>, Iter: IntoIterator<Item = C>> {
-    selector: Expression<F>,
-    constraints: Iter,
-}
-
-impl<F: Field, C: Into<Constraint<F>>, Iter: IntoIterator<Item = C>> Constraints<F, C, Iter> {
-    /// Constructs a set of constraints that are controlled by the given selector.
-    ///
-    /// Each constraint `c` in `iterator` will be converted into the constraint
-    /// `selector * c`.
-    pub fn with_selector(selector: Expression<F>, constraints: Iter) -> Self {
-        Constraints {
-            selector,
-            constraints,
-        }
-    }
-}
-
-fn apply_selector_to_constraint<F: Field, C: Into<Constraint<F>>>(
-    (selector, c): (Expression<F>, C),
-) -> Constraint<F> {
-    let constraint: Constraint<F> = c.into();
-    Constraint {
-        name: constraint.name,
-        poly: selector * constraint.poly,
-    }
-}
-
-type ApplySelectorToConstraint<F, C> = fn((Expression<F>, C)) -> Constraint<F>;
-type ConstraintsIterator<F, C, I> = std::iter::Map<
-    std::iter::Zip<std::iter::Repeat<Expression<F>>, I>,
-    ApplySelectorToConstraint<F, C>,
->;
-
-impl<F: Field, C: Into<Constraint<F>>, Iter: IntoIterator<Item = C>> IntoIterator
-    for Constraints<F, C, Iter>
-{
-    type Item = Constraint<F>;
-    type IntoIter = ConstraintsIterator<F, C, Iter::IntoIter>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        std::iter::repeat(self.selector)
-            .zip(self.constraints.into_iter())
-            .map(apply_selector_to_constraint)
-    }
-}
-
-/// Gate
-#[derive(Clone, Debug)]
-pub struct Gate<F: Field> {
-    name: String,
-    constraint_names: Vec<String>,
-    polys: Vec<Expression<F>>,
-    /// We track queried selectors separately from other cells, so that we can use them to
-    /// trigger debug checks on gates.
-    queried_selectors: Vec<Selector>,
-    queried_cells: Vec<VirtualCell>,
-}
-
-impl<F: Field> Gate<F> {
-    /// Returns the gate name.
-    pub fn name(&self) -> &str {
-        self.name.as_str()
-    }
-
-    /// Returns the name of the constraint at index `constraint_index`.
-    pub fn constraint_name(&self, constraint_index: usize) -> &str {
-        self.constraint_names[constraint_index].as_str()
-    }
-
-    /// Returns constraints of this gate
-    pub fn polynomials(&self) -> &[Expression<F>] {
-        &self.polys
-    }
-
-    pub(crate) fn queried_selectors(&self) -> &[Selector] {
-        &self.queried_selectors
-    }
-
-    pub(crate) fn queried_cells(&self) -> &[VirtualCell] {
-        &self.queried_cells
-    }
-}
-
-/// TODO doc
-#[derive(Debug, Clone)]
-pub struct LookupTracker<F: Field> {
-    pub(crate) table: Vec<Expression<F>>,
-    pub(crate) inputs: Vec<Vec<Expression<F>>>,
-}
-
-/// This is a description of the circuit environment, such as the gate, column and
-/// permutation arrangements.
-#[derive(Debug, Clone)]
-pub struct ConstraintSystem<F: Field> {
-    pub(crate) num_fixed_columns: usize,
-    pub(crate) num_advice_columns: usize,
-    pub(crate) num_instance_columns: usize,
-    pub(crate) num_selectors: usize,
-    pub(crate) num_challenges: usize,
-
-    /// Contains the phase for each advice column. Should have same length as num_advice_columns.
-    pub(crate) advice_column_phase: Vec<sealed::Phase>,
-    /// Contains the phase for each challenge. Should have same length as num_challenges.
-    pub(crate) challenge_phase: Vec<sealed::Phase>,
-
-    /// This is a cached vector that maps virtual selectors to the concrete
-    /// fixed column that they were compressed into. This is just used by dev
-    /// tooling right now.
-    pub(crate) selector_map: Vec<Column<Fixed>>,
-
-    pub(crate) gates: Vec<Gate<F>>,
-    pub(crate) advice_queries: Vec<(Column<Advice>, Rotation)>,
-    // Contains an integer for each advice column
-    // identifying how many distinct queries it has
-    // so far; should be same length as num_advice_columns.
-    num_advice_queries: Vec<usize>,
-    pub(crate) instance_queries: Vec<(Column<Instance>, Rotation)>,
-    pub(crate) fixed_queries: Vec<(Column<Fixed>, Rotation)>,
-
-    // Permutation argument for performing equality constraints
-    pub(crate) permutation: permutation::Argument,
-
-    /// Map from table expression to vec of vec of input expressions
-    pub lookups_map: BTreeMap<String, LookupTracker<F>>,
-
-    // Vector of lookup arguments, where each corresponds to a sequence of
-    // input expressions and a sequence of table expressions involved in the lookup.
-    pub(crate) lookups: Vec<mv_lookup::Argument<F>>,
-
-    // Vector of shuffle arguments, where each corresponds to a sequence of
-    // input expressions and a sequence of shuffle expressions involved in the shuffle.
-    pub(crate) shuffles: Vec<shuffle::Argument<F>>,
-
-    // List of indexes of Fixed columns which are associated to a circuit-general Column tied to their annotation.
-    pub(crate) general_column_annotations: HashMap<metadata::Column, String>,
-
-    // Vector of fixed columns, which can be used to store constant values
-    // that are copied into advice columns.
-    pub(crate) constants: Vec<Column<Fixed>>,
-
-    pub(crate) minimum_degree: Option<usize>,
-}
-
-/// Represents the minimal parameters that determine a `ConstraintSystem`.
-#[allow(dead_code)]
-pub struct PinnedConstraintSystem<'a, F: Field> {
-    num_fixed_columns: &'a usize,
-    num_advice_columns: &'a usize,
-    num_instance_columns: &'a usize,
-    num_selectors: &'a usize,
-    num_challenges: &'a usize,
-    advice_column_phase: &'a Vec<sealed::Phase>,
-    challenge_phase: &'a Vec<sealed::Phase>,
-    gates: PinnedGates<'a, F>,
-    advice_queries: &'a Vec<(Column<Advice>, Rotation)>,
-    instance_queries: &'a Vec<(Column<Instance>, Rotation)>,
-    fixed_queries: &'a Vec<(Column<Fixed>, Rotation)>,
-    permutation: &'a permutation::Argument,
-    lookups_map: &'a BTreeMap<String, LookupTracker<F>>,
-    shuffles: &'a Vec<shuffle::Argument<F>>,
-    constants: &'a Vec<Column<Fixed>>,
-    minimum_degree: &'a Option<usize>,
-}
-
-impl<'a, F: Field> std::fmt::Debug for PinnedConstraintSystem<'a, F> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut debug_struct = f.debug_struct("PinnedConstraintSystem");
-        debug_struct
-            .field("num_fixed_columns", self.num_fixed_columns)
-            .field("num_advice_columns", self.num_advice_columns)
-            .field("num_instance_columns", self.num_instance_columns)
-            .field("num_selectors", self.num_selectors);
-        // Only show multi-phase related fields if it's used.
-        if *self.num_challenges > 0 {
-            debug_struct
-                .field("num_challenges", self.num_challenges)
-                .field("advice_column_phase", self.advice_column_phase)
-                .field("challenge_phase", self.challenge_phase);
-        }
-        debug_struct
-            .field("gates", &self.gates)
-            .field("advice_queries", self.advice_queries)
-            .field("instance_queries", self.instance_queries)
-            .field("fixed_queries", self.fixed_queries)
-            .field("permutation", self.permutation)
-            .field("lookups_map", self.lookups_map)
-            .field("constants", self.constants)
-            .field("minimum_degree", self.minimum_degree);
-        debug_struct.finish()
-    }
-}
-
-struct PinnedGates<'a, F: Field>(&'a Vec<Gate<F>>);
-
-impl<'a, F: Field> std::fmt::Debug for PinnedGates<'a, F> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        f.debug_list()
-            .entries(self.0.iter().flat_map(|gate| gate.polynomials().iter()))
-            .finish()
-    }
-}
-
-impl<F: Field> Default for ConstraintSystem<F> {
-    fn default() -> ConstraintSystem<F> {
-        ConstraintSystem {
-            num_fixed_columns: 0,
-            num_advice_columns: 0,
-            num_instance_columns: 0,
-            num_selectors: 0,
-            num_challenges: 0,
-            advice_column_phase: Vec::new(),
-            challenge_phase: Vec::new(),
-            selector_map: vec![],
-            gates: vec![],
-            fixed_queries: Vec::new(),
-            advice_queries: Vec::new(),
-            num_advice_queries: Vec::new(),
-            instance_queries: Vec::new(),
-            permutation: permutation::Argument::new(),
-            lookups_map: BTreeMap::default(),
-            lookups: Vec::new(),
-            shuffles: Vec::new(),
-            general_column_annotations: HashMap::new(),
-            constants: vec![],
-            minimum_degree: None,
-        }
-    }
-}
-
-impl<F: Field> ConstraintSystem<F> {
-    /// Obtain a pinned version of this constraint system; a structure with the
-    /// minimal parameters needed to determine the rest of the constraint
-    /// system.
-    pub fn pinned(&self) -> PinnedConstraintSystem<'_, F> {
-        PinnedConstraintSystem {
-            num_fixed_columns: &self.num_fixed_columns,
-            num_advice_columns: &self.num_advice_columns,
-            num_instance_columns: &self.num_instance_columns,
-            num_selectors: &self.num_selectors,
-            num_challenges: &self.num_challenges,
-            advice_column_phase: &self.advice_column_phase,
-            challenge_phase: &self.challenge_phase,
-            gates: PinnedGates(&self.gates),
-            fixed_queries: &self.fixed_queries,
-            advice_queries: &self.advice_queries,
-            instance_queries: &self.instance_queries,
-            permutation: &self.permutation,
-            lookups_map: &self.lookups_map,
-            shuffles: &self.shuffles,
-            constants: &self.constants,
-            minimum_degree: &self.minimum_degree,
-        }
-    }
-
-    /// Enables this fixed column to be used for global constant assignments.
-    ///
-    /// # Side-effects
-    ///
-    /// The column will be equality-enabled.
-    pub fn enable_constant(&mut self, column: Column<Fixed>) {
-        if !self.constants.contains(&column) {
-            self.constants.push(column);
-            self.enable_equality(column);
-        }
-    }
-
-    /// Enable the ability to enforce equality over cells in this column
-    pub fn enable_equality<C: Into<Column<Any>>>(&mut self, column: C) {
-        let column = column.into();
-        self.query_any_index(column, Rotation::cur());
-        self.permutation.add_column(column);
-    }
-
-    /// Add a lookup argument for some input expressions and table columns.
-    ///
-    /// `table_map` returns a map between input expressions and the table columns
-    /// they need to match.
-    pub fn lookup(
-        &mut self,
-        // FIXME use name in debug messages
-        name: &'static str,
-        table_map: impl FnOnce(&mut VirtualCells<'_, F>) -> Vec<(Expression<F>, TableColumn)>,
-    ) {
-        let mut cells = VirtualCells::new(self);
-        let table_map: Vec<_> = table_map(&mut cells)
-            .into_iter()
-            .map(|(input, table)| {
-                if input.contains_simple_selector() {
-                    panic!("expression containing simple selector supplied to lookup argument");
-                }
-
-                let table = cells.query_fixed(table.inner(), Rotation::cur());
-
-                (input, table)
-            })
-            .collect();
-
-        let (input_expressions, table_expressions): (Vec<_>, Vec<_>) =
-            table_map.into_iter().unzip();
-        let table_expressions_identifier = table_expressions
-            .iter()
-            .fold(String::new(), |string, expr| string + &expr.identifier());
-
-        self.lookups_map
-            .entry(table_expressions_identifier)
-            .and_modify(|table_tracker| table_tracker.inputs.push(input_expressions.clone()))
-            .or_insert(LookupTracker {
-                table: table_expressions,
-                inputs: vec![input_expressions],
-            });
-    }
-
-    /// Chunk lookup arguments into pieces below a given degree bound
-    pub fn chunk_lookups(mut self) -> Self {
-        if self.lookups_map.is_empty() {
-            return self;
-        }
-
-        let max_gate_degree = self.max_gate_degree();
-        let max_single_lookup_degree: usize = self
-            .lookups_map
-            .values()
-            .map(|v| {
-                let table_degree = v.table.iter().map(|expr| expr.degree()).max().unwrap();
-                let base_lookup_degree = super::mv_lookup::base_degree(table_degree);
-
-                let max_inputs_degree: usize = v
-                    .inputs
-                    .iter()
-                    .map(|input| input.iter().map(|expr| expr.degree()).max().unwrap())
-                    .max()
-                    .unwrap();
-
-                mv_lookup::degree_with_input(base_lookup_degree, max_inputs_degree)
-            })
-            .max()
-            .unwrap();
-
-        let required_degree = std::cmp::max(max_gate_degree, max_single_lookup_degree);
-        let required_degree = (required_degree as u64 - 1).next_power_of_two() as usize;
-
-        self.set_minimum_degree(required_degree + 1);
-
-        // safe to unwrap here
-        let minimum_degree = self.minimum_degree.unwrap();
-
-        let mut lookups: Vec<_> = vec![];
-        for v in self.lookups_map.values() {
-            let LookupTracker { table, inputs } = v;
-            let mut args = vec![super::mv_lookup::Argument::new(table, &[inputs[0].clone()])];
-
-            for input in inputs.iter().skip(1) {
-                let cur_input_degree = input.iter().map(|expr| expr.degree()).max().unwrap();
-                let mut indicator = false;
-                for i in 0..args.len() {
-                    // try to fit input in one of the args
-                    let cur_argument_degree = args[i].required_degree();
-                    let new_potential_degree = cur_argument_degree + cur_input_degree;
-                    if new_potential_degree <= minimum_degree {
-                        args[i].inputs_expressions.push(input.clone());
-                        indicator = true;
-                        break;
-                    }
-                }
-
-                if !indicator {
-                    args.push(super::mv_lookup::Argument::new(table, &[input.clone()]))
-                }
-            }
-            lookups.append(&mut args);
-        }
-        self.lookups = lookups;
-        self
-    }
-
-    /// Add a lookup argument for some input expressions and table expressions.
-    ///
-    /// `table_map` returns a map between input expressions and the table expressions
-    /// they need to match.
-    pub fn lookup_any(
-        &mut self,
-        // FIXME use name in debug messages
-        name: &'static str,
-        table_map: impl FnOnce(&mut VirtualCells<'_, F>) -> Vec<(Expression<F>, Expression<F>)>,
-    ) {
-        let mut cells = VirtualCells::new(self);
-        let table_map = table_map(&mut cells);
-
-        let (input_expressions, table_expressions): (Vec<_>, Vec<_>) =
-            table_map.into_iter().unzip();
-        let table_expressions_identifier = table_expressions
-            .iter()
-            .fold(String::new(), |string, expr| string + &expr.identifier());
-
-        self.lookups_map
-            .entry(table_expressions_identifier)
-            .and_modify(|table_tracker| table_tracker.inputs.push(input_expressions.clone()))
-            .or_insert(LookupTracker {
-                table: table_expressions,
-                inputs: vec![input_expressions],
-            });
-    }
-
-    /// Add a shuffle argument for some input expressions and table expressions.
-    pub fn shuffle<S: AsRef<str>>(
-        &mut self,
-        name: S,
-        shuffle_map: impl FnOnce(&mut VirtualCells<'_, F>) -> Vec<(Expression<F>, Expression<F>)>,
-    ) -> usize {
-        let mut cells = VirtualCells::new(self);
-        let shuffle_map = shuffle_map(&mut cells)
-            .into_iter()
-            .map(|(mut input, mut table)| {
-                input.query_cells(&mut cells);
-                table.query_cells(&mut cells);
-                (input, table)
-            })
-            .collect();
-        let index = self.shuffles.len();
-
-        self.shuffles
-            .push(shuffle::Argument::new(name.as_ref(), shuffle_map));
-
-        index
-    }
-
-    fn query_fixed_index(&mut self, column: Column<Fixed>, at: Rotation) -> usize {
-        // Return existing query, if it exists
-        for (index, fixed_query) in self.fixed_queries.iter().enumerate() {
-            if fixed_query == &(column, at) {
-                return index;
-            }
-        }
-
-        // Make a new query
-        let index = self.fixed_queries.len();
-        self.fixed_queries.push((column, at));
-
-        index
-    }
-
-    pub(crate) fn query_advice_index(&mut self, column: Column<Advice>, at: Rotation) -> usize {
-        // Return existing query, if it exists
-        for (index, advice_query) in self.advice_queries.iter().enumerate() {
-            if advice_query == &(column, at) {
-                return index;
-            }
-        }
-
-        // Make a new query
-        let index = self.advice_queries.len();
-        self.advice_queries.push((column, at));
-        self.num_advice_queries[column.index] += 1;
-
-        index
-    }
-
-    fn query_instance_index(&mut self, column: Column<Instance>, at: Rotation) -> usize {
-        // Return existing query, if it exists
-        for (index, instance_query) in self.instance_queries.iter().enumerate() {
-            if instance_query == &(column, at) {
-                return index;
-            }
-        }
-
-        // Make a new query
-        let index = self.instance_queries.len();
-        self.instance_queries.push((column, at));
-
-        index
-    }
-
-    fn query_any_index(&mut self, column: Column<Any>, at: Rotation) -> usize {
-        match column.column_type() {
-            Any::Advice(_) => {
-                self.query_advice_index(Column::<Advice>::try_from(column).unwrap(), at)
-            }
-            Any::Fixed => self.query_fixed_index(Column::<Fixed>::try_from(column).unwrap(), at),
-            Any::Instance => {
-                self.query_instance_index(Column::<Instance>::try_from(column).unwrap(), at)
-            }
-        }
-    }
-
-    pub(crate) fn get_advice_query_index(&self, column: Column<Advice>, at: Rotation) -> usize {
-        for (index, advice_query) in self.advice_queries.iter().enumerate() {
-            if advice_query == &(column, at) {
-                return index;
-            }
-        }
-
-        panic!("get_advice_query_index called for non-existent query");
-    }
-
-    pub(crate) fn get_fixed_query_index(&self, column: Column<Fixed>, at: Rotation) -> usize {
-        for (index, fixed_query) in self.fixed_queries.iter().enumerate() {
-            if fixed_query == &(column, at) {
-                return index;
-            }
-        }
-
-        panic!("get_fixed_query_index called for non-existent query");
-    }
-
-    pub(crate) fn get_instance_query_index(&self, column: Column<Instance>, at: Rotation) -> usize {
-        for (index, instance_query) in self.instance_queries.iter().enumerate() {
-            if instance_query == &(column, at) {
-                return index;
-            }
-        }
-
-        panic!("get_instance_query_index called for non-existent query");
-    }
-
-    pub(crate) fn get_any_query_index(&self, column: Column<Any>, at: Rotation) -> usize {
-        match column.column_type() {
-            Any::Advice(_) => {
-                self.get_advice_query_index(Column::<Advice>::try_from(column).unwrap(), at)
-            }
-            Any::Fixed => {
-                self.get_fixed_query_index(Column::<Fixed>::try_from(column).unwrap(), at)
-            }
-            Any::Instance => {
-                self.get_instance_query_index(Column::<Instance>::try_from(column).unwrap(), at)
-            }
-        }
-    }
-
-    /// Sets the minimum degree required by the circuit, which can be set to a
-    /// larger amount than actually needed. This can be used, for example, to
-    /// force the permutation argument to involve more columns in the same set.
-    pub fn set_minimum_degree(&mut self, degree: usize) {
-        self.minimum_degree = Some(degree);
-    }
-
-    /// Creates a new gate.
-    ///
-    /// # Panics
-    ///
-    /// A gate is required to contain polynomial constraints. This method will panic if
-    /// `constraints` returns an empty iterator.
-    pub fn create_gate<C: Into<Constraint<F>>, Iter: IntoIterator<Item = C>, S: AsRef<str>>(
-        &mut self,
-        name: S,
-        constraints: impl FnOnce(&mut VirtualCells<'_, F>) -> Iter,
-    ) {
-        let mut cells = VirtualCells::new(self);
-        let constraints = constraints(&mut cells);
-        let (constraint_names, polys): (_, Vec<_>) = constraints
-            .into_iter()
-            .map(|c| c.into())
-            .map(|mut c: Constraint<F>| {
-                c.poly.query_cells(&mut cells);
-                (c.name, c.poly)
-            })
-            .unzip();
-
-        let queried_selectors = cells.queried_selectors;
-        let queried_cells = cells.queried_cells;
-
-        assert!(
-            !polys.is_empty(),
-            "Gates must contain at least one constraint."
-        );
-
-        self.gates.push(Gate {
-            name: name.as_ref().to_string(),
-            constraint_names,
-            polys,
-            queried_selectors,
-            queried_cells,
-        });
-    }
-
-    /// This will compress selectors together depending on their provided
-    /// assignments. This `ConstraintSystem` will then be modified to add new
-    /// fixed columns (representing the actual selectors) and will return the
-    /// polynomials for those columns. Finally, an internal map is updated to
-    /// find which fixed column corresponds with a given `Selector`.
-    ///
-    /// Do not call this twice. Yes, this should be a builder pattern instead.
-    pub fn compress_selectors(mut self, selectors: Vec<Vec<bool>>) -> (Self, Vec<Vec<F>>) {
-        // The number of provided selector assignments must be the number we
-        // counted for this constraint system.
-        assert_eq!(selectors.len(), self.num_selectors);
-
-        // Compute the maximal degree of every selector. We only consider the
-        // expressions in gates, as lookup arguments cannot support simple
-        // selectors. Selectors that are complex or do not appear in any gates
-        // will have degree zero.
-        let mut degrees = vec![0; selectors.len()];
-        for expr in self.gates.iter().flat_map(|gate| gate.polys.iter()) {
-            if let Some(selector) = expr.extract_simple_selector() {
-                degrees[selector.0] = max(degrees[selector.0], expr.degree());
-            }
-        }
-
-        // We will not increase the degree of the constraint system, so we limit
-        // ourselves to the largest existing degree constraint.
-        let max_degree = self.degree();
-
-        let mut new_columns = vec![];
-        let (polys, selector_assignment) = compress_selectors::process(
-            selectors
-                .into_iter()
-                .zip(degrees.into_iter())
-                .enumerate()
-                .map(
-                    |(i, (activations, max_degree))| compress_selectors::SelectorDescription {
-                        selector: i,
-                        activations,
-                        max_degree,
-                    },
-                )
-                .collect(),
-            max_degree,
-            || {
-                let column = self.fixed_column();
-                new_columns.push(column);
-                Expression::Fixed(FixedQuery {
-                    index: Some(self.query_fixed_index(column, Rotation::cur())),
-                    column_index: column.index,
-                    rotation: Rotation::cur(),
-                })
-            },
-        );
-
-        let mut selector_map = vec![None; selector_assignment.len()];
-        let mut selector_replacements = vec![None; selector_assignment.len()];
-        for assignment in selector_assignment {
-            selector_replacements[assignment.selector] = Some(assignment.expression);
-            selector_map[assignment.selector] = Some(new_columns[assignment.combination_index]);
-        }
-
-        self.selector_map = selector_map
-            .into_iter()
-            .map(|a| a.unwrap())
-            .collect::<Vec<_>>();
-        let selector_replacements = selector_replacements
-            .into_iter()
-            .map(|a| a.unwrap())
-            .collect::<Vec<_>>();
-
-        fn replace_selectors<F: Field>(
-            expr: &mut Expression<F>,
-            selector_replacements: &[Expression<F>],
-            must_be_nonsimple: bool,
-        ) {
-            *expr = expr.evaluate(
-                &|constant| Expression::Constant(constant),
-                &|selector| {
-                    if must_be_nonsimple {
-                        // Simple selectors are prohibited from appearing in
-                        // expressions in the lookup argument by
-                        // `ConstraintSystem`.
-                        assert!(!selector.is_simple());
-                    }
-
-                    selector_replacements[selector.0].clone()
-                },
-                &|query| Expression::Fixed(query),
-                &|query| Expression::Advice(query),
-                &|query| Expression::Instance(query),
-                &|challenge| Expression::Challenge(challenge),
-                &|a| -a,
-                &|a, b| a + b,
-                &|a, b| a * b,
-                &|a, f| a * f,
-            );
-        }
-
-        // Substitute selectors for the real fixed columns in all gates
-        for expr in self.gates.iter_mut().flat_map(|gate| gate.polys.iter_mut()) {
-            replace_selectors(expr, &selector_replacements, false);
-        }
-
-        // Substitute non-simple selectors for the real fixed columns in all
-        // lookup expressions
-        for expr in self.lookups.iter_mut().flat_map(|lookup| {
-            lookup
-                .inputs_expressions
-                .iter_mut()
-                .flatten()
-                .chain(lookup.table_expressions.iter_mut())
-        }) {
-            replace_selectors(expr, &selector_replacements, true);
-        }
-
-        for expr in self.shuffles.iter_mut().flat_map(|shuffle| {
-            shuffle
-                .input_expressions
-                .iter_mut()
-                .chain(shuffle.shuffle_expressions.iter_mut())
-        }) {
-            replace_selectors(expr, &selector_replacements, true);
-        }
-
-        (self, polys)
-    }
-
-    /// Allocate a new (simple) selector. Simple selectors cannot be added to
-    /// expressions nor multiplied by other expressions containing simple
-    /// selectors. Also, simple selectors may not appear in lookup argument
-    /// inputs.
-    pub fn selector(&mut self) -> Selector {
-        let index = self.num_selectors;
-        self.num_selectors += 1;
-        Selector(index, true)
-    }
-
-    /// Allocate a new complex selector that can appear anywhere
-    /// within expressions.
-    pub fn complex_selector(&mut self) -> Selector {
-        let index = self.num_selectors;
-        self.num_selectors += 1;
-        Selector(index, false)
-    }
-
-    /// Allocates a new fixed column that can be used in a lookup table.
-    pub fn lookup_table_column(&mut self) -> TableColumn {
-        TableColumn {
-            inner: self.fixed_column(),
-        }
-    }
-
-    /// Annotate a Lookup column.
-    pub fn annotate_lookup_column<A, AR>(&mut self, column: TableColumn, annotation: A)
+    /// Enters into a namespace.
+    fn namespace<NR, N>(&mut self, name_fn: N) -> NamespacedLayouter<'_, F, Self::Root>
     where
-        A: Fn() -> AR,
-        AR: Into<String>,
+        NR: Into<String>,
+        N: FnOnce() -> NR,
     {
-        // We don't care if the table has already an annotation. If it's the case we keep the new one.
-        self.general_column_annotations.insert(
-            metadata::Column::from((Any::Fixed, column.inner().index)),
-            annotation().into(),
-        );
-    }
+        self.get_root().push_namespace(name_fn);
 
-    /// Annotate an Instance column.
-    pub fn annotate_lookup_any_column<A, AR, T>(&mut self, column: T, annotation: A)
-    where
-        A: Fn() -> AR,
-        AR: Into<String>,
-        T: Into<Column<Any>>,
-    {
-        let col_any = column.into();
-        // We don't care if the table has already an annotation. If it's the case we keep the new one.
-        self.general_column_annotations.insert(
-            metadata::Column::from((col_any.column_type, col_any.index)),
-            annotation().into(),
-        );
-    }
-
-    /// Allocate a new fixed column
-    pub fn fixed_column(&mut self) -> Column<Fixed> {
-        let tmp = Column {
-            index: self.num_fixed_columns,
-            column_type: Fixed,
-        };
-        self.num_fixed_columns += 1;
-        tmp
-    }
-
-    /// Allocate a new advice column at `FirstPhase`
-    pub fn advice_column(&mut self) -> Column<Advice> {
-        self.advice_column_in(FirstPhase)
-    }
-
-    /// Allocate a new advice column in given phase
-    pub fn advice_column_in<P: Phase>(&mut self, phase: P) -> Column<Advice> {
-        let phase = phase.to_sealed();
-        if let Some(previous_phase) = phase.prev() {
-            self.assert_phase_exists(
-                previous_phase,
-                format!("Column<Advice> in later phase {:?}", phase).as_str(),
-            );
-        }
-
-        let tmp = Column {
-            index: self.num_advice_columns,
-            column_type: Advice { phase },
-        };
-        self.num_advice_columns += 1;
-        self.num_advice_queries.push(0);
-        self.advice_column_phase.push(phase);
-        tmp
-    }
-
-    /// Allocate a new instance column
-    pub fn instance_column(&mut self) -> Column<Instance> {
-        let tmp = Column {
-            index: self.num_instance_columns,
-            column_type: Instance,
-        };
-        self.num_instance_columns += 1;
-        tmp
-    }
-
-    /// Requests a challenge that is usable after the given phase.
-    pub fn challenge_usable_after<P: Phase>(&mut self, phase: P) -> Challenge {
-        let phase = phase.to_sealed();
-        self.assert_phase_exists(
-            phase,
-            format!("Challenge usable after phase {:?}", phase).as_str(),
-        );
-
-        let tmp = Challenge {
-            index: self.num_challenges,
-            phase,
-        };
-        self.num_challenges += 1;
-        self.challenge_phase.push(phase);
-        tmp
-    }
-
-    /// Helper funciotn to assert phase exists, to make sure phase-aware resources
-    /// are allocated in order, and to avoid any phase to be skipped accidentally
-    /// to cause unexpected issue in the future.
-    fn assert_phase_exists(&self, phase: sealed::Phase, resource: &str) {
-        self.advice_column_phase
-            .iter()
-            .find(|advice_column_phase| **advice_column_phase == phase)
-            .unwrap_or_else(|| {
-                panic!(
-                    "No Column<Advice> is used in phase {:?} while allocating a new {:?}",
-                    phase, resource
-                )
-            });
-    }
-
-    pub(crate) fn phases(&self) -> impl Iterator<Item = sealed::Phase> {
-        let max_phase = self
-            .advice_column_phase
-            .iter()
-            .max()
-            .map(|phase| phase.0)
-            .unwrap_or_default();
-        (0..=max_phase).map(sealed::Phase)
-    }
-
-    /// Compute the maximum degree of gates in the constraint system
-    pub fn max_gate_degree(&self) -> usize {
-        self.gates
-            .iter()
-            .flat_map(|gate| gate.polynomials().iter().map(|poly| poly.degree()))
-            .max()
-            .unwrap_or(0)
-    }
-
-    /// Compute the degree of the constraint system (the maximum degree of all
-    /// constraints).
-    pub fn degree(&self) -> usize {
-        // The permutation argument will serve alongside the gates, so must be
-        // accounted for.
-        let mut degree = self.permutation.required_degree();
-
-        // The lookup argument also serves alongside the gates and must be accounted
-        // for.
-        degree = std::cmp::max(
-            degree,
-            self.lookups
-                .iter()
-                .map(|l| l.required_degree())
-                .max()
-                .unwrap_or(1),
-        );
-
-        // The lookup argument also serves alongside the gates and must be accounted
-        // for.
-        degree = std::cmp::max(
-            degree,
-            self.shuffles
-                .iter()
-                .map(|l| l.required_degree())
-                .max()
-                .unwrap_or(1),
-        );
-
-        // Account for each gate to ensure our quotient polynomial is the
-        // correct degree and that our extended domain is the right size.
-        degree = std::cmp::max(
-            degree,
-            self.gates
-                .iter()
-                .flat_map(|gate| gate.polynomials().iter().map(|poly| poly.degree()))
-                .max()
-                .unwrap_or(0),
-        );
-
-        std::cmp::max(degree, self.minimum_degree.unwrap_or(1))
-    }
-
-    /// Compute the number of blinding factors necessary to perfectly blind
-    /// each of the prover's witness polynomials.
-    pub fn blinding_factors(&self) -> usize {
-        // All of the prover's advice columns are evaluated at no more than
-        let factors = *self.num_advice_queries.iter().max().unwrap_or(&1);
-        // distinct points during gate checks.
-
-        // - The permutation argument witness polynomials are evaluated at most 3 times.
-        // - Each lookup argument has independent witness polynomials, and they are
-        //   evaluated at most 2 times.
-        let factors = std::cmp::max(3, factors);
-
-        // Each polynomial is evaluated at most an additional time during
-        // multiopen (at x_3 to produce q_evals):
-        let factors = factors + 1;
-
-        // h(x) is derived by the other evaluations so it does not reveal
-        // anything; in fact it does not even appear in the proof.
-
-        // h(x_3) is also not revealed; the verifier only learns a single
-        // evaluation of a polynomial in x_1 which has h(x_3) and another random
-        // polynomial evaluated at x_3 as coefficients -- this random polynomial
-        // is "random_poly" in the vanishing argument.
-
-        // Add an additional blinding factor as a slight defense against
-        // off-by-one errors.
-        factors + 1
-    }
-
-    /// Returns the minimum necessary rows that need to exist in order to
-    /// account for e.g. blinding factors.
-    pub fn minimum_rows(&self) -> usize {
-        self.blinding_factors() // m blinding factors
-            + 1 // for l_{-(m + 1)} (l_last)
-            + 1 // for l_0 (just for extra breathing room for the permutation
-                // argument, to essentially force a separation in the
-                // permutation polynomial between the roles of l_last, l_0
-                // and the interstitial values.)
-            + 1 // for at least one row
-    }
-
-    /// Returns number of fixed columns
-    pub fn num_fixed_columns(&self) -> usize {
-        self.num_fixed_columns
-    }
-
-    /// Returns number of advice columns
-    pub fn num_advice_columns(&self) -> usize {
-        self.num_advice_columns
-    }
-
-    /// Returns number of instance columns
-    pub fn num_instance_columns(&self) -> usize {
-        self.num_instance_columns
-    }
-
-    /// Returns number of selectors
-    pub fn num_selectors(&self) -> usize {
-        self.num_selectors
-    }
-
-    /// Returns number of challenges
-    pub fn num_challenges(&self) -> usize {
-        self.num_challenges
-    }
-
-    /// Returns phase of advice columns
-    pub fn advice_column_phase(&self) -> Vec<u8> {
-        self.advice_column_phase
-            .iter()
-            .map(|phase| phase.0)
-            .collect()
-    }
-
-    /// Returns phase of challenges
-    pub fn challenge_phase(&self) -> Vec<u8> {
-        self.challenge_phase.iter().map(|phase| phase.0).collect()
-    }
-
-    /// Returns gates
-    pub fn gates(&self) -> &Vec<Gate<F>> {
-        &self.gates
-    }
-
-    /// Returns general column annotations
-    pub fn general_column_annotations(&self) -> &HashMap<metadata::Column, String> {
-        &self.general_column_annotations
-    }
-
-    /// Returns advice queries
-    pub fn advice_queries(&self) -> &Vec<(Column<Advice>, Rotation)> {
-        &self.advice_queries
-    }
-
-    /// Returns instance queries
-    pub fn instance_queries(&self) -> &Vec<(Column<Instance>, Rotation)> {
-        &self.instance_queries
-    }
-
-    /// Returns fixed queries
-    pub fn fixed_queries(&self) -> &Vec<(Column<Fixed>, Rotation)> {
-        &self.fixed_queries
-    }
-
-    /// Returns permutation argument
-    pub fn permutation(&self) -> &permutation::Argument {
-        &self.permutation
-    }
-
-    /// Returns lookup arguments
-    pub fn lookups(&self) -> &Vec<mv_lookup::Argument<F>> {
-        &self.lookups
-    }
-
-    /// Returns shuffle arguments
-    pub fn shuffles(&self) -> &Vec<shuffle::Argument<F>> {
-        &self.shuffles
-    }
-
-    /// Returns constants
-    pub fn constants(&self) -> &Vec<Column<Fixed>> {
-        &self.constants
+        NamespacedLayouter(self.get_root(), PhantomData)
     }
 }
 
-/// Exposes the "virtual cells" that can be queried while creating a custom gate or lookup
-/// table.
+/// This is a "namespaced" layouter which borrows a `Layouter` (pushing a namespace
+/// context) and, when dropped, pops out of the namespace context.
 #[derive(Debug)]
-pub struct VirtualCells<'a, F: Field> {
-    meta: &'a mut ConstraintSystem<F>,
-    queried_selectors: Vec<Selector>,
-    queried_cells: Vec<VirtualCell>,
+pub struct NamespacedLayouter<'a, F: Field, L: Layouter<F> + 'a>(&'a mut L, PhantomData<F>);
+
+impl<'a, F: Field, L: Layouter<F> + 'a> Layouter<F> for NamespacedLayouter<'a, F, L> {
+    type Root = L::Root;
+
+    fn assign_region<A, AR, N, NR>(&mut self, name: N, assignment: A) -> Result<AR, Error>
+    where
+        A: FnMut(Region<'_, F>) -> Result<AR, Error>,
+        N: Fn() -> NR,
+        NR: Into<String>,
+    {
+        self.0.assign_region(name, assignment)
+    }
+
+    fn assign_table<A, N, NR>(&mut self, name: N, assignment: A) -> Result<(), Error>
+    where
+        A: FnMut(Table<'_, F>) -> Result<(), Error>,
+        N: Fn() -> NR,
+        NR: Into<String>,
+    {
+        self.0.assign_table(name, assignment)
+    }
+
+    fn constrain_instance(
+        &mut self,
+        cell: Cell,
+        column: Column<Instance>,
+        row: usize,
+    ) -> Result<(), Error> {
+        self.0.constrain_instance(cell, column, row)
+    }
+
+    fn get_challenge(&self, challenge: Challenge) -> Value<F> {
+        self.0.get_challenge(challenge)
+    }
+
+    fn get_root(&mut self) -> &mut Self::Root {
+        self.0.get_root()
+    }
+
+    fn push_namespace<NR, N>(&mut self, _name_fn: N)
+    where
+        NR: Into<String>,
+        N: FnOnce() -> NR,
+    {
+        panic!("Only the root's push_namespace should be called");
+    }
+
+    fn pop_namespace(&mut self, _gadget_name: Option<String>) {
+        panic!("Only the root's pop_namespace should be called");
+    }
 }
 
-impl<'a, F: Field> VirtualCells<'a, F> {
-    fn new(meta: &'a mut ConstraintSystem<F>) -> Self {
-        VirtualCells {
-            meta,
-            queried_selectors: vec![],
-            queried_cells: vec![],
-        }
-    }
+impl<'a, F: Field, L: Layouter<F> + 'a> Drop for NamespacedLayouter<'a, F, L> {
+    fn drop(&mut self) {
+        let gadget_name = {
+            #[cfg(feature = "gadget-traces")]
+            {
+                let mut gadget_name = None;
+                let mut is_second_frame = false;
+                backtrace::trace(|frame| {
+                    if is_second_frame {
+                        // Resolve this instruction pointer to a symbol name.
+                        backtrace::resolve_frame(frame, |symbol| {
+                            gadget_name = symbol.name().map(|name| format!("{:#}", name));
+                        });
 
-    /// Query a selector at the current position.
-    pub fn query_selector(&mut self, selector: Selector) -> Expression<F> {
-        self.queried_selectors.push(selector);
-        Expression::Selector(selector)
-    }
+                        // We are done!
+                        false
+                    } else {
+                        // We want the next frame.
+                        is_second_frame = true;
+                        true
+                    }
+                });
+                gadget_name
+            }
 
-    /// Query a fixed column at a relative position
-    pub fn query_fixed(&mut self, column: Column<Fixed>, at: Rotation) -> Expression<F> {
-        self.queried_cells.push((column, at).into());
-        Expression::Fixed(FixedQuery {
-            index: Some(self.meta.query_fixed_index(column, at)),
-            column_index: column.index,
-            rotation: at,
-        })
-    }
+            #[cfg(not(feature = "gadget-traces"))]
+            None
+        };
 
-    /// Query an advice column at a relative position
-    pub fn query_advice(&mut self, column: Column<Advice>, at: Rotation) -> Expression<F> {
-        self.queried_cells.push((column, at).into());
-        Expression::Advice(AdviceQuery {
-            index: Some(self.meta.query_advice_index(column, at)),
-            column_index: column.index,
-            rotation: at,
-            phase: column.column_type().phase,
-        })
-    }
-
-    /// Query an instance column at a relative position
-    pub fn query_instance(&mut self, column: Column<Instance>, at: Rotation) -> Expression<F> {
-        self.queried_cells.push((column, at).into());
-        Expression::Instance(InstanceQuery {
-            index: Some(self.meta.query_instance_index(column, at)),
-            column_index: column.index,
-            rotation: at,
-        })
-    }
-
-    /// Query an Any column at a relative position
-    pub fn query_any<C: Into<Column<Any>>>(&mut self, column: C, at: Rotation) -> Expression<F> {
-        let column = column.into();
-        match column.column_type() {
-            Any::Advice(_) => self.query_advice(Column::<Advice>::try_from(column).unwrap(), at),
-            Any::Fixed => self.query_fixed(Column::<Fixed>::try_from(column).unwrap(), at),
-            Any::Instance => self.query_instance(Column::<Instance>::try_from(column).unwrap(), at),
-        }
-    }
-
-    /// Query a challenge
-    pub fn query_challenge(&mut self, challenge: Challenge) -> Expression<F> {
-        Expression::Challenge(challenge)
+        self.get_root().pop_namespace(gadget_name);
     }
 }
