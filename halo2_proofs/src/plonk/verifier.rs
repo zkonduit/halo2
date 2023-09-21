@@ -131,7 +131,7 @@ where
             vk.cs
                 .lookups
                 .iter()
-                .map(|argument| argument.read_permuted_commitments(transcript))
+                .map(|argument| argument.read_prepared_commitments(transcript))
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -152,10 +152,10 @@ where
     let lookups_committed = lookups_permuted
         .into_iter()
         .map(|lookups| {
-            // Hash each lookup product commitment
+            // Hash each lookup sum commitment
             lookups
                 .into_iter()
-                .map(|lookup| lookup.read_product_commitment(transcript))
+                .map(|lookup| lookup.read_grand_sum_commitment(transcript))
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -188,7 +188,7 @@ where
             })
             .collect::<Result<Vec<_>, _>>()?
     } else {
-        let xn = x.pow([params.n(), 0, 0, 0]);
+        let xn = x.pow(&[params.n() as u64, 0, 0, 0]);
         let (min_rotation, max_rotation) =
             vk.cs
                 .instance_queries
@@ -267,7 +267,7 @@ where
     // commitments open to the correct values.
     let vanishing = {
         // x^n
-        let xn = x.pow([params.n(), 0, 0, 0]);
+        let xn = x.pow(&[params.n() as u64, 0, 0, 0]);
 
         let blinding_factors = vk.cs.blinding_factors();
         let l_evals = vk
@@ -325,39 +325,46 @@ where
                             gamma,
                             x,
                         ))
-                        .chain(lookups.iter().zip(vk.cs.lookups.iter()).flat_map(
-                            move |(p, argument)| {
-                                p.expressions(
-                                    l_0,
-                                    l_last,
-                                    l_blind,
-                                    argument,
-                                    theta,
-                                    beta,
-                                    gamma,
-                                    advice_evals,
-                                    fixed_evals,
-                                    instance_evals,
-                                    challenges,
-                                )
-                            },
-                        ))
-                        .chain(shuffles.iter().zip(vk.cs.shuffles.iter()).flat_map(
-                            move |(p, argument)| {
-                                p.expressions(
-                                    l_0,
-                                    l_last,
-                                    l_blind,
-                                    argument,
-                                    theta,
-                                    gamma,
-                                    advice_evals,
-                                    fixed_evals,
-                                    instance_evals,
-                                    challenges,
-                                )
-                            },
-                        ))
+                        .chain(
+                            lookups
+                                .iter()
+                                .zip(vk.cs.lookups.iter())
+                                .flat_map(move |(p, argument)| {
+                                    p.expressions(
+                                        l_0,
+                                        l_last,
+                                        l_blind,
+                                        argument,
+                                        theta,
+                                        beta,
+                                        advice_evals,
+                                        fixed_evals,
+                                        instance_evals,
+                                        challenges,
+                                    )
+                                })
+                                .into_iter(),
+                        )
+                        .chain(
+                            shuffles
+                                .iter()
+                                .zip(vk.cs.shuffles.iter())
+                                .flat_map(move |(p, argument)| {
+                                    p.expressions(
+                                        l_0,
+                                        l_last,
+                                        l_blind,
+                                        argument,
+                                        theta,
+                                        gamma,
+                                        advice_evals,
+                                        fixed_evals,
+                                        instance_evals,
+                                        challenges,
+                                    )
+                                })
+                                .into_iter(),
+                        )
                 },
             );
 
@@ -411,8 +418,18 @@ where
                         },
                     ))
                     .chain(permutation.queries(vk, x))
-                    .chain(lookups.iter().flat_map(move |p| p.queries(vk, x)))
-                    .chain(shuffles.iter().flat_map(move |p| p.queries(vk, x)))
+                    .chain(
+                        lookups
+                            .iter()
+                            .flat_map(move |p| p.queries(vk, x))
+                            .into_iter(),
+                    )
+                    .chain(
+                        shuffles
+                            .iter()
+                            .flat_map(move |p| p.queries(vk, x))
+                            .into_iter(),
+                    )
             },
         )
         .chain(

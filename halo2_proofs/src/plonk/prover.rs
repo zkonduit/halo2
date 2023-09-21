@@ -15,7 +15,7 @@ use super::{
         Advice, Any, Assignment, Challenge, Circuit, Column, ConstraintSystem, FirstPhase, Fixed,
         FloorPlanner, Instance, Selector,
     },
-    lookup, permutation, shuffle, vanishing, ChallengeBeta, ChallengeGamma, ChallengeTheta,
+    mv_lookup, permutation, shuffle, vanishing, ChallengeBeta, ChallengeGamma, ChallengeTheta,
     ChallengeX, ChallengeY, Error, Expression, ProvingKey,
 };
 use crate::circuit::layouter::SyncDeps;
@@ -412,7 +412,7 @@ where
     // Sample theta challenge for keeping lookup columns linearly independent
     let theta: ChallengeTheta<_> = transcript.squeeze_challenge_scalar();
 
-    let lookups: Vec<Vec<lookup::prover::Permuted<Scheme::Curve>>> = instance
+    let lookups: Vec<Vec<mv_lookup::prover::Prepared<Scheme::Curve>>> = instance
         .iter()
         .zip(advice.iter())
         .map(|(instance, advice)| -> Result<Vec<_>, Error> {
@@ -422,7 +422,7 @@ where
                 .lookups
                 .iter()
                 .map(|lookup| {
-                    lookup.commit_permuted(
+                    lookup.prepare(
                         pk,
                         params,
                         domain,
@@ -465,13 +465,13 @@ where
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let lookups: Vec<Vec<lookup::prover::Committed<Scheme::Curve>>> = lookups
+    let lookups: Vec<Vec<mv_lookup::prover::Committed<Scheme::Curve>>> = lookups
         .into_iter()
         .map(|lookups| -> Result<Vec<_>, _> {
             // Construct and commit to products for each lookup
             lookups
                 .into_iter()
-                .map(|lookup| lookup.commit_product(pk, params, beta, gamma, &mut rng, transcript))
+                .map(|lookup| lookup.commit_grand_sum(pk, params, beta, &mut rng, transcript))
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -554,7 +554,7 @@ where
     let vanishing = vanishing.construct(params, domain, h_poly, &mut rng, transcript)?;
 
     let x: ChallengeX<_> = transcript.squeeze_challenge_scalar();
-    let xn = x.pow([params.n(), 0, 0, 0]);
+    let xn = x.pow(&[params.n() as u64, 0, 0, 0]);
 
     if P::QUERY_INSTANCE {
         // Compute and hash instance evals for each circuit instance
@@ -624,7 +624,7 @@ where
         .collect::<Result<Vec<_>, _>>()?;
 
     // Evaluate the lookups, if any, at omega^i x.
-    let lookups: Vec<Vec<lookup::prover::Evaluated<Scheme::Curve>>> = lookups
+    let lookups: Vec<Vec<mv_lookup::prover::Evaluated<Scheme::Curve>>> = lookups
         .into_iter()
         .map(|lookups| -> Result<Vec<_>, _> {
             lookups
@@ -677,8 +677,8 @@ where
                         }),
                 )
                 .chain(permutation.open(pk, x))
-                .chain(lookups.iter().flat_map(move |p| p.open(pk, x)))
-                .chain(shuffles.iter().flat_map(move |p| p.open(pk, x)))
+                .chain(lookups.iter().flat_map(move |p| p.open(pk, x)).into_iter())
+                .chain(shuffles.iter().flat_map(move |p| p.open(pk, x)).into_iter())
         })
         .chain(
             pk.vk

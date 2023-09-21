@@ -26,6 +26,7 @@ mod error;
 mod evaluation;
 mod keygen;
 mod lookup;
+mod mv_lookup;
 pub mod permutation;
 mod shuffle;
 mod vanishing;
@@ -128,7 +129,7 @@ where
             .map(|mut selector| {
                 let mut selector_bytes = vec![0u8; (selector.len() + 7) / 8];
                 reader.read_exact(&mut selector_bytes)?;
-                for (bits, byte) in selector.chunks_mut(8).zip(selector_bytes) {
+                for (bits, byte) in selector.chunks_mut(8).into_iter().zip(selector_bytes) {
                     crate::helpers::unpack(byte, bits);
                 }
                 Ok(selector)
