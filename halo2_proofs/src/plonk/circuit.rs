@@ -577,6 +577,7 @@ pub struct TableColumn {
 }
 
 impl TableColumn {
+    ///
     pub fn inner(&self) -> Column<Fixed> {
         self.inner
     }
