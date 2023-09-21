@@ -573,7 +573,7 @@ pub struct TableColumn {
     /// This inner column MUST NOT be exposed in the public API, or else chip developers
     /// can load lookup tables into their circuits without default-value-filling the
     /// columns, which can cause soundness bugs.
-    inner: Column<Fixed>,
+    pub inner: Column<Fixed>,
 }
 
 impl TableColumn {
