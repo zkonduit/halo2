@@ -25,18 +25,6 @@
 #![allow(unused_imports)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 
-pub mod arithmetic;
-pub mod circuit;
-pub use halo2curves;
-mod multicore;
-pub mod plonk;
-pub mod poly;
-pub mod transcript;
-
-pub mod dev;
-mod helpers;
-pub use helpers::SerdeFormat;
-
 #[cfg(feature = "counter")]
 #[macro_use]
 extern crate lazy_static;
@@ -55,3 +43,15 @@ lazy_static! {
     static ref FFT_COUNTER: Mutex<BTreeMap<usize, usize>> = Mutex::new(BTreeMap::new());
     static ref MSM_COUNTER: Mutex<BTreeMap<usize, usize>> = Mutex::new(BTreeMap::new());
 }
+
+pub mod arithmetic;
+pub mod circuit;
+pub use halo2curves;
+mod multicore;
+pub mod plonk;
+pub mod poly;
+pub mod transcript;
+
+pub mod dev;
+mod helpers;
+pub use helpers::SerdeFormat;
