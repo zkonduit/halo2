@@ -1765,6 +1765,7 @@ impl<F: Field> ConstraintSystem<F> {
         }
 
         let max_gate_degree = self.max_gate_degree();
+        log::trace!("max gate degree: {}", max_gate_degree);
         let max_single_lookup_degree: usize = self
             .lookups_map
             .values()
@@ -1783,14 +1784,19 @@ impl<F: Field> ConstraintSystem<F> {
             })
             .max()
             .unwrap();
+        log::trace!("max_single_lookup_degree: {}", max_gate_degree);
 
         let required_degree = std::cmp::max(max_gate_degree, max_single_lookup_degree);
         let required_degree = (required_degree as u64 - 1).next_power_of_two() as usize;
+
+        log::trace!("required_degree: {}", required_degree);
 
         self.set_minimum_degree(required_degree + 1);
 
         // safe to unwrap here
         let minimum_degree = self.minimum_degree.unwrap();
+
+        log::trace!("minimum_degree: {}", minimum_degree);
 
         let mut lookups: Vec<_> = vec![];
         for v in self.lookups_map.values() {

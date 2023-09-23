@@ -48,6 +48,7 @@ name = "fft"
 harness = false
 
 [dependencies]
+log = { version = "0.4.17", default_features = false }
 backtrace = { version = "0.3", optional = true }
 rayon = "1.5.1"
 ff = "0.13"
