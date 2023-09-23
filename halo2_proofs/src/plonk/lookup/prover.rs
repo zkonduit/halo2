@@ -17,6 +17,11 @@ use group::{
     ff::{BatchInvert, Field},
     Curve,
 };
+use maybe_rayon::prelude::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelIterator,
+};
+use maybe_rayon::slice::ParallelSliceMut;
 use rand_core::RngCore;
 use std::{
     collections::BTreeMap,
@@ -427,7 +432,7 @@ fn permute_expression_pair_par<'params, C: CurveAffine, P: Params<'params, C>, R
     input_expression: &Polynomial<C::Scalar, LagrangeCoeff>,
     table_expression: &Polynomial<C::Scalar, LagrangeCoeff>,
 ) -> Result<ExpressionPair<C::Scalar>, Error> {
-    let num_threads = rayon::current_num_threads();
+    let num_threads = maybe_rayon::current_num_threads();
     let blinding_factors = pk.vk.cs.blinding_factors();
     let usable_rows = params.n() as usize - (blinding_factors + 1);
 
