@@ -26,6 +26,7 @@ mod error;
 mod evaluation;
 mod keygen;
 mod lookup;
+mod mv_lookup;
 pub mod permutation;
 mod shuffle;
 mod vanishing;
