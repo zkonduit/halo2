@@ -53,6 +53,16 @@ pub fn create_proof<
 where
     Scheme::Scalar: WithSmallOrderMulGroup<3> + FromUniformBytes<64>,
 {
+    #[cfg(feature = "counter")]
+    {
+        use crate::{FFT_COUNTER, MSM_COUNTER};
+        use std::collections::BTreeMap;
+
+        // reset counters at the beginning of the prove
+        *MSM_COUNTER.lock().unwrap() = BTreeMap::new();
+        *FFT_COUNTER.lock().unwrap() = BTreeMap::new();
+    }
+
     if circuits.len() != instances.len() {
         return Err(Error::InvalidInstances);
     }
@@ -691,6 +701,18 @@ where
         .chain(pk.permutation.open(x))
         // We query the h(X) polynomial at x
         .chain(vanishing.open(x));
+
+    #[cfg(feature = "counter")]
+    {
+        use crate::{FFT_COUNTER, MSM_COUNTER};
+        use std::collections::BTreeMap;
+        log::debug!("MSM_COUNTER: {:?}", MSM_COUNTER.lock().unwrap());
+        log::debug!("FFT_COUNTER: {:?}", *FFT_COUNTER.lock().unwrap());
+
+        // reset counters at the end of the proving
+        *MSM_COUNTER.lock().unwrap() = BTreeMap::new();
+        *FFT_COUNTER.lock().unwrap() = BTreeMap::new();
+    }
 
     let prover = P::new(params);
     prover
