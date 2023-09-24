@@ -59,6 +59,7 @@ blake2b_simd = "1" # MSRV 1.66.0
 sha3 = "0.9.1"
 rand_chacha = "0.3"
 maybe-rayon = { version = "0.1.0", default-features = false }
+lazy_static = { version = "1", optional = true }
 
 # Developer tooling dependencies
 plotters = { version = "0.3.0", default-features = false, optional = true }
@@ -92,6 +93,7 @@ thread-safe-region = []
 sanity-checks = []
 batch = ["rand_core/getrandom"]
 circuit-params = []
+counter = ["lazy_static"]
 
 [lib]
 bench = false
