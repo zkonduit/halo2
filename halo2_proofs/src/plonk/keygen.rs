@@ -42,7 +42,7 @@ where
     let config = ConcreteCircuit::configure(&mut cs);
 
     // TODO: hmmmmmmmmm
-    let cs = cs.chunk_lookups();
+    // let cs = cs.chunk_lookups();
 
     let degree = cs.degree();
 
