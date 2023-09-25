@@ -41,6 +41,7 @@ where
     #[cfg(not(feature = "circuit-params"))]
     let config = ConcreteCircuit::configure(&mut cs);
 
+    // TODO: hmmmmmmmmm
     let cs = cs.chunk_lookups();
 
     let degree = cs.degree();
