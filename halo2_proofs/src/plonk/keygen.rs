@@ -41,8 +41,7 @@ where
     #[cfg(not(feature = "circuit-params"))]
     let config = ConcreteCircuit::configure(&mut cs);
 
-    // TODO: hmmmmmmmmm
-    // let cs = cs.chunk_lookups();
+    let cs = cs.chunk_lookups();
 
     let degree = cs.degree();
 
@@ -286,7 +285,7 @@ where
     #[cfg(not(feature = "circuit-params"))]
     let config = ConcreteCircuit::configure(&mut cs);
 
-    let cs = cs;
+    let cs = cs.chunk_lookups();
 
     if (params.n() as usize) < cs.minimum_rows() {
         return Err(Error::not_enough_rows_available(params.k()));
