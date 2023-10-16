@@ -1802,15 +1802,9 @@ impl<F: Field> ConstraintSystem<F> {
             .unwrap();
         log::debug!("max single lookup degree: {}", max_gate_degree);
 
-        let required_degree = std::cmp::max(max_gate_degree, max_single_lookup_degree);
-        let required_degree = (required_degree as u64 - 1).next_power_of_two() as usize;
-
-        log::debug!("required degree: {}", required_degree);
-
-        self.set_minimum_degree(required_degree + 1);
-
-        // safe to unwrap here
-        let minimum_degree = self.minimum_degree.unwrap();
+        let minimum_degree = std::cmp::max(max_gate_degree, max_single_lookup_degree);
+        // TODO: Find the best degree that needs least commitment
+        // let minimum_degree = (minimum_degree as u64 - 1).next_power_of_two() as usize + 1;
 
         log::trace!("minimum degree: {}", minimum_degree);
 
