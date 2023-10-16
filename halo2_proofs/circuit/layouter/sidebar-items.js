@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["RegionColumn"],"struct":["RegionShape"],"trait":["RegionLayouter","SyncDeps","TableLayouter"]};

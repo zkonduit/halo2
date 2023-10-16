@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["SerdeFormat"],"mod":["arithmetic","circuit","dev","plonk","poly","transcript"]};

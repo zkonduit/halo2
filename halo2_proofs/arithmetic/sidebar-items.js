@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["best_fft","best_multiexp","compute_inner_product","eval_polynomial","g_to_lagrange","kate_division","lagrange_interpolate","parallelize","recursive_butterfly_arithmetic","small_multiexp"],"trait":["CurveAffine","CurveExt","FftGroup","Field"]};

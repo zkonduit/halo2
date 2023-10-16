@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["chip"],"struct":["FixedPoint","FixedPointBaseField","FixedPointShort","NonIdentityPoint","Point","ScalarFixed","ScalarFixedShort","ScalarVar","X"],"trait":["BaseFitsInScalarInstructions","EccInstructions","FixedPoints"]};

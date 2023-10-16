@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["Accumulator","AccumulatorStrategy","GuardIPA","SingleStrategy"]};
