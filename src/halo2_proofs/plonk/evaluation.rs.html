@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `halo2_proofs/src/plonk/evaluation.rs`."><title>evaluation.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-deb46770fd761b69.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="halo2_proofs" data-themes="" data-resource-suffix="" data-rustdoc-version="1.75.0-nightly (42b1224e9 2023-10-15)" data-channel="nightly" data-search-js="search-8fbf244ebcf71464.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f34af1a0ee6bacd.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-2c020d218678b618.svg"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/katex.min.css" integrity="sha384-9eLZqc9ds8eNjO3TmqPeYcDj8n+Qfa4nuSiGYa6DjLNcv9BtN69ZIulL9+8CqC9Y" crossorigin="anonymous">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `halo2_proofs/src/plonk/evaluation.rs`."><title>evaluation.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-deb46770fd761b69.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="halo2_proofs" data-themes="" data-resource-suffix="" data-rustdoc-version="1.75.0-nightly (0039d739d 2023-10-18)" data-channel="nightly" data-search-js="search-8fbf244ebcf71464.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f34af1a0ee6bacd.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-2c020d218678b618.svg"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/katex.min.css" integrity="sha384-9eLZqc9ds8eNjO3TmqPeYcDj8n+Qfa4nuSiGYa6DjLNcv9BtN69ZIulL9+8CqC9Y" crossorigin="anonymous">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/katex.min.js"                  integrity="sha384-K3vbOmF2BtaVai+Qk37uypf7VrgBubhQreNQe9aGsz9lB63dIFiQVlJbr92dw2Lx" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/contrib/auto-render.min.js"    integrity="sha384-kmZOZB5ObwgQnS/DuDg6TScgOiWWBiVt0plIRkZCmE6rDZGrEOQeHM5PcHi+nyqe" crossorigin="anonymous"></script>
 <script>
@@ -884,13 +884,125 @@
 <a href="#869" id="869">869</a>
 <a href="#870" id="870">870</a>
 <a href="#871" id="871">871</a>
+<a href="#872" id="872">872</a>
+<a href="#873" id="873">873</a>
+<a href="#874" id="874">874</a>
+<a href="#875" id="875">875</a>
+<a href="#876" id="876">876</a>
+<a href="#877" id="877">877</a>
+<a href="#878" id="878">878</a>
+<a href="#879" id="879">879</a>
+<a href="#880" id="880">880</a>
+<a href="#881" id="881">881</a>
+<a href="#882" id="882">882</a>
+<a href="#883" id="883">883</a>
+<a href="#884" id="884">884</a>
+<a href="#885" id="885">885</a>
+<a href="#886" id="886">886</a>
+<a href="#887" id="887">887</a>
+<a href="#888" id="888">888</a>
+<a href="#889" id="889">889</a>
+<a href="#890" id="890">890</a>
+<a href="#891" id="891">891</a>
+<a href="#892" id="892">892</a>
+<a href="#893" id="893">893</a>
+<a href="#894" id="894">894</a>
+<a href="#895" id="895">895</a>
+<a href="#896" id="896">896</a>
+<a href="#897" id="897">897</a>
+<a href="#898" id="898">898</a>
+<a href="#899" id="899">899</a>
+<a href="#900" id="900">900</a>
+<a href="#901" id="901">901</a>
+<a href="#902" id="902">902</a>
+<a href="#903" id="903">903</a>
+<a href="#904" id="904">904</a>
+<a href="#905" id="905">905</a>
+<a href="#906" id="906">906</a>
+<a href="#907" id="907">907</a>
+<a href="#908" id="908">908</a>
+<a href="#909" id="909">909</a>
+<a href="#910" id="910">910</a>
+<a href="#911" id="911">911</a>
+<a href="#912" id="912">912</a>
+<a href="#913" id="913">913</a>
+<a href="#914" id="914">914</a>
+<a href="#915" id="915">915</a>
+<a href="#916" id="916">916</a>
+<a href="#917" id="917">917</a>
+<a href="#918" id="918">918</a>
+<a href="#919" id="919">919</a>
+<a href="#920" id="920">920</a>
+<a href="#921" id="921">921</a>
+<a href="#922" id="922">922</a>
+<a href="#923" id="923">923</a>
+<a href="#924" id="924">924</a>
+<a href="#925" id="925">925</a>
+<a href="#926" id="926">926</a>
+<a href="#927" id="927">927</a>
+<a href="#928" id="928">928</a>
+<a href="#929" id="929">929</a>
+<a href="#930" id="930">930</a>
+<a href="#931" id="931">931</a>
+<a href="#932" id="932">932</a>
+<a href="#933" id="933">933</a>
+<a href="#934" id="934">934</a>
+<a href="#935" id="935">935</a>
+<a href="#936" id="936">936</a>
+<a href="#937" id="937">937</a>
+<a href="#938" id="938">938</a>
+<a href="#939" id="939">939</a>
+<a href="#940" id="940">940</a>
+<a href="#941" id="941">941</a>
+<a href="#942" id="942">942</a>
+<a href="#943" id="943">943</a>
+<a href="#944" id="944">944</a>
+<a href="#945" id="945">945</a>
+<a href="#946" id="946">946</a>
+<a href="#947" id="947">947</a>
+<a href="#948" id="948">948</a>
+<a href="#949" id="949">949</a>
+<a href="#950" id="950">950</a>
+<a href="#951" id="951">951</a>
+<a href="#952" id="952">952</a>
+<a href="#953" id="953">953</a>
+<a href="#954" id="954">954</a>
+<a href="#955" id="955">955</a>
+<a href="#956" id="956">956</a>
+<a href="#957" id="957">957</a>
+<a href="#958" id="958">958</a>
+<a href="#959" id="959">959</a>
+<a href="#960" id="960">960</a>
+<a href="#961" id="961">961</a>
+<a href="#962" id="962">962</a>
+<a href="#963" id="963">963</a>
+<a href="#964" id="964">964</a>
+<a href="#965" id="965">965</a>
+<a href="#966" id="966">966</a>
+<a href="#967" id="967">967</a>
+<a href="#968" id="968">968</a>
+<a href="#969" id="969">969</a>
+<a href="#970" id="970">970</a>
+<a href="#971" id="971">971</a>
+<a href="#972" id="972">972</a>
+<a href="#973" id="973">973</a>
+<a href="#974" id="974">974</a>
+<a href="#975" id="975">975</a>
+<a href="#976" id="976">976</a>
+<a href="#977" id="977">977</a>
+<a href="#978" id="978">978</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::multicore;
-<span class="kw">use </span><span class="kw">crate</span>::plonk::{lookup, permutation, Any, ProvingKey};
+<span class="kw">use </span><span class="kw">crate</span>::plonk::lookup::prover::Committed;
+<span class="kw">use </span><span class="kw">crate</span>::plonk::permutation::Argument;
+<span class="kw">use </span><span class="kw">crate</span>::plonk::{
+    mv_lookup, permutation, AdviceQuery, Any, FixedQuery, InstanceQuery, ProvingKey,
+};
 <span class="kw">use </span><span class="kw">crate</span>::poly::Basis;
 <span class="kw">use crate</span>::{
     arithmetic::{parallelize, CurveAffine},
     poly::{Coeff, ExtendedLagrangeCoeff, Polynomial, Rotation},
 };
+<span class="kw">use </span>ff::BatchInvert;
 <span class="kw">use </span>group::ff::{Field, PrimeField, WithSmallOrderMulGroup};
 
 <span class="kw">use super</span>::{shuffle, ConstraintSystem, Expression};
@@ -1054,7 +1166,7 @@
     <span class="doccomment">///  Custom gates evalution
     </span><span class="kw">pub </span>custom_gates: GraphEvaluator&lt;C&gt;,
     <span class="doccomment">///  Lookups evalution
-    </span><span class="kw">pub </span>lookups: Vec&lt;GraphEvaluator&lt;C&gt;&gt;,
+    </span><span class="kw">pub </span>lookups: Vec&lt;(Vec&lt;GraphEvaluator&lt;C&gt;&gt;, GraphEvaluator&lt;C&gt;)&gt;,
     <span class="doccomment">///  Shuffle evalution
     </span><span class="kw">pub </span>shuffles: Vec&lt;GraphEvaluator&lt;C&gt;&gt;,
 }
@@ -1112,9 +1224,12 @@
 
         <span class="comment">// Lookups
         </span><span class="kw">for </span>lookup <span class="kw">in </span>cs.lookups.iter() {
-            <span class="kw">let </span><span class="kw-2">mut </span>graph = GraphEvaluator::default();
+            <span class="kw">let </span><span class="kw-2">mut </span>graph_table = GraphEvaluator::default();
+            <span class="kw">let </span><span class="kw-2">mut </span>graph_inputs: Vec&lt;<span class="kw">_</span>&gt; = (<span class="number">0</span>..lookup.inputs_expressions.len())
+                .map(|<span class="kw">_</span>| GraphEvaluator::default())
+                .collect();
 
-            <span class="kw">let </span><span class="kw-2">mut </span>evaluate_lc = |expressions: <span class="kw-2">&amp;</span>Vec&lt;Expression&lt;<span class="kw">_</span>&gt;&gt;| {
+            <span class="kw">let </span>evaluate_lc = |graph: <span class="kw-2">&amp;mut </span>GraphEvaluator&lt;C&gt;, expressions: <span class="kw-2">&amp;</span>Vec&lt;Expression&lt;<span class="kw">_</span>&gt;&gt;| {
                 <span class="kw">let </span>parts = expressions
                     .iter()
                     .map(|expr| graph.add_expression(expr))
@@ -1126,22 +1241,33 @@
                 ))
             };
 
-            <span class="comment">// Input coset
-            </span><span class="kw">let </span>compressed_input_coset = evaluate_lc(<span class="kw-2">&amp;</span>lookup.input_expressions);
+            <span class="comment">// Inputs cosets
+            </span><span class="kw">for </span>(input_expressions, graph_input) <span class="kw">in </span>lookup
+                .inputs_expressions
+                .iter()
+                .zip(graph_inputs.iter_mut())
+            {
+                <span class="kw">let </span>compressed_input_coset = evaluate_lc(graph_input, input_expressions);
+
+                graph_input.add_calculation(Calculation::Add(
+                    compressed_input_coset,
+                    ValueSource::Beta(),
+                ));
+            }
+
             <span class="comment">// table coset
-            </span><span class="kw">let </span>compressed_table_coset = evaluate_lc(<span class="kw-2">&amp;</span>lookup.table_expressions);
-            <span class="comment">// z(\omega X) (a&#39;(X) + \beta) (s&#39;(X) + \gamma)
-            </span><span class="kw">let </span>right_gamma = graph.add_calculation(Calculation::Add(
+            </span><span class="kw">let </span>compressed_table_coset = evaluate_lc(<span class="kw-2">&amp;mut </span>graph_table, <span class="kw-2">&amp;</span>lookup.table_expressions);
+
+            graph_table.add_calculation(Calculation::Add(
                 compressed_table_coset,
-                ValueSource::Gamma(),
-            ));
-            <span class="kw">let </span>lc = graph.add_calculation(Calculation::Add(
-                compressed_input_coset,
                 ValueSource::Beta(),
             ));
-            graph.add_calculation(Calculation::Mul(lc, right_gamma));
 
-            ev.lookups.push(graph);
+            <span class="comment">/*
+                a) f_i + beta
+                b) t + beta
+            */
+            </span>ev.lookups.push((graph_inputs.to_vec(), graph_table));
         }
 
         <span class="comment">// Shuffles
@@ -1192,7 +1318,7 @@
         beta: C::ScalarExt,
         gamma: C::ScalarExt,
         theta: C::ScalarExt,
-        lookups: <span class="kw-2">&amp;</span>[Vec&lt;lookup::prover::Committed&lt;C&gt;&gt;],
+        lookups: <span class="kw-2">&amp;</span>[Vec&lt;mv_lookup::prover::Committed&lt;C&gt;&gt;],
         shuffles: <span class="kw-2">&amp;</span>[Vec&lt;shuffle::prover::Committed&lt;C&gt;&gt;],
         permutations: <span class="kw-2">&amp;</span>[permutation::prover::Committed&lt;C&gt;],
     ) -&gt; Polynomial&lt;C::ScalarExt, ExtendedLagrangeCoeff&gt; {
@@ -1281,7 +1407,7 @@
 
                 <span class="comment">// Permutation constraints
                 </span>parallelize(<span class="kw-2">&amp;mut </span>values, |values, start| {
-                    <span class="kw">let </span><span class="kw-2">mut </span>beta_term = extended_omega.pow_vartime([start <span class="kw">as </span>u64, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>]);
+                    <span class="kw">let </span><span class="kw-2">mut </span>beta_term = extended_omega.pow_vartime(<span class="kw-2">&amp;</span>[start <span class="kw">as </span>u64, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>]);
                     <span class="kw">for </span>(i, value) <span class="kw">in </span>values.iter_mut().enumerate() {
                         <span class="kw">let </span>idx = start + i;
                         <span class="kw">let </span>r_next = get_rotation_idx(idx, <span class="number">1</span>, rot_scale, isize);
@@ -1350,30 +1476,129 @@
                 });
             }
 
+            <span class="comment">// For lookups, compute inputs_inv_sum = ∑ 1 / (f_i(X) + α)
+            // The outer vector has capacity self.lookups.len()
+            // The middle vector has capacity domain.extended_len()
+            // The inner vector has capacity
+            </span><span class="kw">let </span>inputs_inv_sum: Vec&lt;Vec&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;&gt; = lookups
+                .iter()
+                .enumerate()
+                .map(|(n, <span class="kw">_</span>)| {
+                    <span class="kw">let </span>(inputs_lookup_evaluator, <span class="kw">_</span>) = <span class="kw-2">&amp;</span><span class="self">self</span>.lookups[n];
+                    <span class="kw">let </span><span class="kw-2">mut </span>inputs_eval_data: Vec&lt;<span class="kw">_</span>&gt; = inputs_lookup_evaluator
+                        .iter()
+                        .map(|input_lookup_evaluator| input_lookup_evaluator.instance())
+                        .collect();
+
+                    <span class="kw">let </span><span class="kw-2">mut </span>inputs_values_for_extended_domain: Vec&lt;C::Scalar&gt; =
+                        Vec::with_capacity(<span class="self">self</span>.lookups[n].<span class="number">0</span>.len() * domain.extended_len());
+                    <span class="kw">for </span>idx <span class="kw">in </span><span class="number">0</span>..domain.extended_len() {
+                        <span class="comment">// For each compressed input column, evaluate at ω^i and add beta
+                        // This is a vector of length self.lookups[n].0.len()
+                        </span><span class="kw">let </span>inputs_values: Vec&lt;C::ScalarExt&gt; = inputs_lookup_evaluator
+                            .iter()
+                            .zip(inputs_eval_data.iter_mut())
+                            .map(|(input_lookup_evaluator, input_eval_data)| {
+                                input_lookup_evaluator.evaluate(
+                                    input_eval_data,
+                                    fixed,
+                                    advice,
+                                    instance,
+                                    challenges,
+                                    <span class="kw-2">&amp;</span>beta,
+                                    <span class="kw-2">&amp;</span>gamma,
+                                    <span class="kw-2">&amp;</span>theta,
+                                    <span class="kw-2">&amp;</span>y,
+                                    <span class="kw-2">&amp;</span>C::ScalarExt::ZERO,
+                                    idx,
+                                    rot_scale,
+                                    isize,
+                                )
+                            })
+                            .collect();
+
+                        inputs_values_for_extended_domain.extend_from_slice(<span class="kw-2">&amp;</span>inputs_values);
+                    }
+
+                    inputs_values_for_extended_domain.batch_invert();
+
+                    <span class="comment">// The outer vector has capacity domain.extended_len()
+                    // The inner vector has capacity self.lookups[n].0.len()
+                    </span><span class="kw">let </span>inputs_inv_sums: Vec&lt;Vec&lt;<span class="kw">_</span>&gt;&gt; = inputs_values_for_extended_domain
+                        .chunks_exact(<span class="self">self</span>.lookups[n].<span class="number">0</span>.len())
+                        .map(|c| c.to_vec())
+                        .collect();
+
+                    inputs_inv_sums
+                })
+                .collect();
+
             <span class="comment">// Lookups
             </span><span class="kw">for </span>(n, lookup) <span class="kw">in </span>lookups.iter().enumerate() {
                 <span class="comment">// Polynomials required for this lookup.
                 // Calculated here so these only have to be kept in memory for the short time
                 // they are actually needed.
-                </span><span class="kw">let </span>product_coset = pk.vk.domain.coeff_to_extended(lookup.product_poly.clone());
-                <span class="kw">let </span>permuted_input_coset = pk
-                    .vk
-                    .domain
-                    .coeff_to_extended(lookup.permuted_input_poly.clone());
-                <span class="kw">let </span>permuted_table_coset = pk
-                    .vk
-                    .domain
-                    .coeff_to_extended(lookup.permuted_table_poly.clone());
+                </span><span class="kw">let </span>phi_coset = pk.vk.domain.coeff_to_extended(lookup.phi_poly.clone());
+                <span class="kw">let </span>m_coset = pk.vk.domain.coeff_to_extended(lookup.m_poly.clone());
 
                 <span class="comment">// Lookup constraints
+                /*
+                    φ_i(X) = f_i(X) + α
+                    τ(X) = t(X) + α
+                    LHS = τ(X) * Π(φ_i(X)) * (ϕ(gX) - ϕ(X))
+                    RHS = τ(X) * Π(φ_i(X)) * (∑ 1/(φ_i(X)) - m(X) / τ(X))))
+                        = (τ(X) * Π(φ_i(X)) * ∑ 1/(φ_i(X))) - Π(φ_i(X)) * m(X)
+                        = Π(φ_i(X)) * (τ(X) * ∑ 1/(φ_i(X)) - m(X))
+                */
                 </span>parallelize(<span class="kw-2">&amp;mut </span>values, |values, start| {
-                    <span class="kw">let </span>lookup_evaluator = <span class="kw-2">&amp;</span><span class="self">self</span>.lookups[n];
-                    <span class="kw">let </span><span class="kw-2">mut </span>eval_data = lookup_evaluator.instance();
+                    <span class="kw">let </span>(inputs_lookup_evaluator, table_lookup_evaluator) = <span class="kw-2">&amp;</span><span class="self">self</span>.lookups[n];
+                    <span class="kw">let </span><span class="kw-2">mut </span>inputs_eval_data: Vec&lt;<span class="kw">_</span>&gt; = inputs_lookup_evaluator
+                        .iter()
+                        .map(|input_lookup_evaluator| input_lookup_evaluator.instance())
+                        .collect();
+
+                    <span class="kw">let </span><span class="kw-2">mut </span>table_eval_data = table_lookup_evaluator.instance();
+
                     <span class="kw">for </span>(i, value) <span class="kw">in </span>values.iter_mut().enumerate() {
                         <span class="kw">let </span>idx = start + i;
 
-                        <span class="kw">let </span>table_value = lookup_evaluator.evaluate(
-                            <span class="kw-2">&amp;mut </span>eval_data,
+                        <span class="comment">// f_i(X) + α for i in expressions
+                        </span><span class="kw">let </span>inputs_value: Vec&lt;C::ScalarExt&gt; = inputs_lookup_evaluator
+                            .iter()
+                            .zip(inputs_eval_data.iter_mut())
+                            .map(|(input_lookup_evaluator, input_eval_data)| {
+                                input_lookup_evaluator.evaluate(
+                                    input_eval_data,
+                                    fixed,
+                                    advice,
+                                    instance,
+                                    challenges,
+                                    <span class="kw-2">&amp;</span>beta,
+                                    <span class="kw-2">&amp;</span>gamma,
+                                    <span class="kw-2">&amp;</span>theta,
+                                    <span class="kw-2">&amp;</span>y,
+                                    <span class="kw-2">&amp;</span>C::ScalarExt::ZERO,
+                                    idx,
+                                    rot_scale,
+                                    isize,
+                                )
+                            })
+                            .collect();
+
+                        <span class="comment">// Π(φ_i(X))
+                        </span><span class="kw">let </span>inputs_prod: C::Scalar = inputs_value
+                            .iter()
+                            .fold(C::Scalar::ONE, |acc, input| acc * input);
+
+                        <span class="comment">// f_i(X) + α at ω^idx
+                        </span><span class="kw">let </span>fi_inverses = <span class="kw-2">&amp;</span>inputs_inv_sum[n][idx];
+                        <span class="kw">let </span>inputs_inv_sum = fi_inverses
+                            .iter()
+                            .fold(C::Scalar::ZERO, |acc, input| acc + input);
+
+                        <span class="comment">// t(X) + α
+                        </span><span class="kw">let </span>table_value = table_lookup_evaluator.evaluate(
+                            <span class="kw-2">&amp;mut </span>table_eval_data,
                             fixed,
                             advice,
                             instance,
@@ -1389,38 +1614,27 @@
                         );
 
                         <span class="kw">let </span>r_next = get_rotation_idx(idx, <span class="number">1</span>, rot_scale, isize);
-                        <span class="kw">let </span>r_prev = get_rotation_idx(idx, -<span class="number">1</span>, rot_scale, isize);
 
-                        <span class="kw">let </span>a_minus_s = permuted_input_coset[idx] - permuted_table_coset[idx];
-                        <span class="comment">// l_0(X) * (1 - z(X)) = 0
-                        </span><span class="kw-2">*</span>value = <span class="kw-2">*</span>value * y + ((one - product_coset[idx]) * l0[idx]);
-                        <span class="comment">// l_last(X) * (z(X)^2 - z(X)) = 0
-                        </span><span class="kw-2">*</span>value = <span class="kw-2">*</span>value * y
-                            + ((product_coset[idx] * product_coset[idx] - product_coset[idx])
-                                * l_last[idx]);
-                        <span class="comment">// (1 - (l_last(X) + l_blind(X))) * (
-                        //   z(\omega X) (a&#39;(X) + \beta) (s&#39;(X) + \gamma)
-                        //   - z(X) (\theta^{m-1} a_0(X) + ... + a_{m-1}(X) + \beta)
-                        //          (\theta^{m-1} s_0(X) + ... + s_{m-1}(X) + \gamma)
-                        // ) = 0
-                        </span><span class="kw-2">*</span>value = <span class="kw-2">*</span>value * y
-                            + ((product_coset[r_next]
-                                * (permuted_input_coset[idx] + beta)
-                                * (permuted_table_coset[idx] + gamma)
-                                - product_coset[idx] * table_value)
-                                * l_active_row[idx]);
-                        <span class="comment">// Check that the first values in the permuted input expression and permuted
-                        // fixed expression are the same.
-                        // l_0(X) * (a&#39;(X) - s&#39;(X)) = 0
-                        </span><span class="kw-2">*</span>value = <span class="kw-2">*</span>value * y + (a_minus_s * l0[idx]);
-                        <span class="comment">// Check that each value in the permuted lookup input expression is either
-                        // equal to the value above it, or the value at the same index in the
-                        // permuted table expression.
-                        // (1 - (l_last + l_blind)) * (a′(X) − s′(X))⋅(a′(X) − a′(\omega^{-1} X)) = 0
-                        </span><span class="kw-2">*</span>value = <span class="kw-2">*</span>value * y
-                            + (a_minus_s
-                                * (permuted_input_coset[idx] - permuted_input_coset[r_prev])
-                                * l_active_row[idx]);
+                        <span class="kw">let </span>lhs = {
+                            <span class="comment">// τ(X) * Π(φ_i(X)) * (ϕ(gX) - ϕ(X))
+                            </span>table_value * inputs_prod * (phi_coset[r_next] - phi_coset[idx])
+                        };
+
+                        <span class="kw">let </span>rhs = {
+                            <span class="comment">//   τ(X) * Π(φ_i(X)) * (∑ 1/(φ_i(X)) - m(X) / τ(X))))
+                            // = (τ(X) * Π(φ_i(X)) * ∑ 1/(φ_i(X))) - Π(φ_i(X)) * m(X)
+                            // = Π(φ_i(X)) * (τ(X) * ∑ 1/(φ_i(X)) - m(X))
+                            </span>inputs_prod * (table_value * inputs_inv_sum - m_coset[idx])
+                        };
+
+                        <span class="comment">// phi[0] = 0
+                        </span><span class="kw-2">*</span>value = <span class="kw-2">*</span>value * y + l0[idx] * phi_coset[idx];
+
+                        <span class="comment">// phi[u] = 0
+                        </span><span class="kw-2">*</span>value = <span class="kw-2">*</span>value * y + l_last[idx] * phi_coset[idx];
+
+                        <span class="comment">// q(X) = LHS - RHS mod zH(X)
+                        </span><span class="kw-2">*</span>value = <span class="kw-2">*</span>value * y + (lhs - rhs) * l_active_row[idx];
                     }
                 });
             }

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `halo2_proofs/src/dev.rs`."><title>dev.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../static.files/rustdoc-deb46770fd761b69.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="halo2_proofs" data-themes="" data-resource-suffix="" data-rustdoc-version="1.75.0-nightly (42b1224e9 2023-10-15)" data-channel="nightly" data-search-js="search-8fbf244ebcf71464.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f34af1a0ee6bacd.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-2c020d218678b618.svg"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/katex.min.css" integrity="sha384-9eLZqc9ds8eNjO3TmqPeYcDj8n+Qfa4nuSiGYa6DjLNcv9BtN69ZIulL9+8CqC9Y" crossorigin="anonymous">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `halo2_proofs/src/dev.rs`."><title>dev.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../static.files/rustdoc-deb46770fd761b69.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="halo2_proofs" data-themes="" data-resource-suffix="" data-rustdoc-version="1.75.0-nightly (0039d739d 2023-10-18)" data-channel="nightly" data-search-js="search-8fbf244ebcf71464.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f34af1a0ee6bacd.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-2c020d218678b618.svg"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/katex.min.css" integrity="sha384-9eLZqc9ds8eNjO3TmqPeYcDj8n+Qfa4nuSiGYa6DjLNcv9BtN69ZIulL9+8CqC9Y" crossorigin="anonymous">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/katex.min.js"                  integrity="sha384-K3vbOmF2BtaVai+Qk37uypf7VrgBubhQreNQe9aGsz9lB63dIFiQVlJbr92dw2Lx" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/contrib/auto-render.min.js"    integrity="sha384-kmZOZB5ObwgQnS/DuDg6TScgOiWWBiVt0plIRkZCmE6rDZGrEOQeHM5PcHi+nyqe" crossorigin="anonymous"></script>
 <script>
@@ -2300,6 +2300,92 @@
 <a href="#2285" id="2285">2285</a>
 <a href="#2286" id="2286">2286</a>
 <a href="#2287" id="2287">2287</a>
+<a href="#2288" id="2288">2288</a>
+<a href="#2289" id="2289">2289</a>
+<a href="#2290" id="2290">2290</a>
+<a href="#2291" id="2291">2291</a>
+<a href="#2292" id="2292">2292</a>
+<a href="#2293" id="2293">2293</a>
+<a href="#2294" id="2294">2294</a>
+<a href="#2295" id="2295">2295</a>
+<a href="#2296" id="2296">2296</a>
+<a href="#2297" id="2297">2297</a>
+<a href="#2298" id="2298">2298</a>
+<a href="#2299" id="2299">2299</a>
+<a href="#2300" id="2300">2300</a>
+<a href="#2301" id="2301">2301</a>
+<a href="#2302" id="2302">2302</a>
+<a href="#2303" id="2303">2303</a>
+<a href="#2304" id="2304">2304</a>
+<a href="#2305" id="2305">2305</a>
+<a href="#2306" id="2306">2306</a>
+<a href="#2307" id="2307">2307</a>
+<a href="#2308" id="2308">2308</a>
+<a href="#2309" id="2309">2309</a>
+<a href="#2310" id="2310">2310</a>
+<a href="#2311" id="2311">2311</a>
+<a href="#2312" id="2312">2312</a>
+<a href="#2313" id="2313">2313</a>
+<a href="#2314" id="2314">2314</a>
+<a href="#2315" id="2315">2315</a>
+<a href="#2316" id="2316">2316</a>
+<a href="#2317" id="2317">2317</a>
+<a href="#2318" id="2318">2318</a>
+<a href="#2319" id="2319">2319</a>
+<a href="#2320" id="2320">2320</a>
+<a href="#2321" id="2321">2321</a>
+<a href="#2322" id="2322">2322</a>
+<a href="#2323" id="2323">2323</a>
+<a href="#2324" id="2324">2324</a>
+<a href="#2325" id="2325">2325</a>
+<a href="#2326" id="2326">2326</a>
+<a href="#2327" id="2327">2327</a>
+<a href="#2328" id="2328">2328</a>
+<a href="#2329" id="2329">2329</a>
+<a href="#2330" id="2330">2330</a>
+<a href="#2331" id="2331">2331</a>
+<a href="#2332" id="2332">2332</a>
+<a href="#2333" id="2333">2333</a>
+<a href="#2334" id="2334">2334</a>
+<a href="#2335" id="2335">2335</a>
+<a href="#2336" id="2336">2336</a>
+<a href="#2337" id="2337">2337</a>
+<a href="#2338" id="2338">2338</a>
+<a href="#2339" id="2339">2339</a>
+<a href="#2340" id="2340">2340</a>
+<a href="#2341" id="2341">2341</a>
+<a href="#2342" id="2342">2342</a>
+<a href="#2343" id="2343">2343</a>
+<a href="#2344" id="2344">2344</a>
+<a href="#2345" id="2345">2345</a>
+<a href="#2346" id="2346">2346</a>
+<a href="#2347" id="2347">2347</a>
+<a href="#2348" id="2348">2348</a>
+<a href="#2349" id="2349">2349</a>
+<a href="#2350" id="2350">2350</a>
+<a href="#2351" id="2351">2351</a>
+<a href="#2352" id="2352">2352</a>
+<a href="#2353" id="2353">2353</a>
+<a href="#2354" id="2354">2354</a>
+<a href="#2355" id="2355">2355</a>
+<a href="#2356" id="2356">2356</a>
+<a href="#2357" id="2357">2357</a>
+<a href="#2358" id="2358">2358</a>
+<a href="#2359" id="2359">2359</a>
+<a href="#2360" id="2360">2360</a>
+<a href="#2361" id="2361">2361</a>
+<a href="#2362" id="2362">2362</a>
+<a href="#2363" id="2363">2363</a>
+<a href="#2364" id="2364">2364</a>
+<a href="#2365" id="2365">2365</a>
+<a href="#2366" id="2366">2366</a>
+<a href="#2367" id="2367">2367</a>
+<a href="#2368" id="2368">2368</a>
+<a href="#2369" id="2369">2369</a>
+<a href="#2370" id="2370">2370</a>
+<a href="#2371" id="2371">2371</a>
+<a href="#2372" id="2372">2372</a>
+<a href="#2373" id="2373">2373</a>
 </pre></div><pre class="rust"><code><span class="doccomment">//! Tools for developing circuits.
 
 </span><span class="kw">use </span>std::collections::HashMap;
@@ -2917,6 +3003,7 @@
         </span><span class="kw">let </span>config = ConcreteCircuit::configure_with_params(<span class="kw-2">&amp;mut </span>cs, circuit.params());
         <span class="attr">#[cfg(not(feature = <span class="string">&quot;circuit-params&quot;</span>))]
         </span><span class="kw">let </span>config = ConcreteCircuit::configure(<span class="kw-2">&amp;mut </span>cs);
+        <span class="kw">let </span>cs = cs.chunk_lookups();
         <span class="kw">let </span>cs = cs;
 
         <span class="macro">assert!</span>(
@@ -3139,7 +3226,11 @@
                 .flat_map(|(gate_index, gate)| {
                     <span class="kw">let </span>blinding_rows =
                         (<span class="self">self</span>.n <span class="kw">as </span>usize - (<span class="self">self</span>.cs.blinding_factors() + <span class="number">1</span>))..(<span class="self">self</span>.n <span class="kw">as </span>usize);
-                    (gate_row_ids.clone().chain(blinding_rows)).flat_map(<span class="kw">move </span>|row| {
+                    (gate_row_ids
+                        .clone()
+                        .into_iter()
+                        .chain(blinding_rows.into_iter()))
+                    .flat_map(<span class="kw">move </span>|row| {
                         <span class="kw">let </span>row = row <span class="kw">as </span>i32 + n;
                         gate.polynomials().iter().enumerate().filter_map(
                             <span class="kw">move </span>|(poly_index, poly)| <span class="kw">match </span>poly.evaluate_lazy(
@@ -3246,7 +3337,48 @@
                 .iter()
                 .enumerate()
                 .flat_map(|(lookup_index, lookup)| {
-                    <span class="macro">assert!</span>(lookup.table_expressions.len() == lookup.input_expressions.len());
+                    <span class="kw">let </span>load = |expression: <span class="kw-2">&amp;</span>Expression&lt;F&gt;, row| {
+                        expression.evaluate_lazy(
+                            <span class="kw-2">&amp;</span>|scalar| Value::Real(scalar),
+                            <span class="kw-2">&amp;</span>|<span class="kw">_</span>| <span class="macro">panic!</span>(<span class="string">&quot;virtual selectors are removed during optimization&quot;</span>),
+                            <span class="kw-2">&amp;</span>|query| {
+                                <span class="kw">let </span>query = <span class="self">self</span>.cs.fixed_queries[query.index.unwrap()];
+                                <span class="kw">let </span>column_index = query.<span class="number">0</span>.index();
+                                <span class="kw">let </span>rotation = query.<span class="number">1 </span>.<span class="number">0</span>;
+                                <span class="self">self</span>.fixed[column_index]
+                                    [(row <span class="kw">as </span>i32 + n + rotation) <span class="kw">as </span>usize % n <span class="kw">as </span>usize]
+                                    .into()
+                            },
+                            <span class="kw-2">&amp;</span>|query| {
+                                <span class="kw">let </span>query = <span class="self">self</span>.cs.advice_queries[query.index.unwrap()];
+                                <span class="kw">let </span>column_index = query.<span class="number">0</span>.index();
+                                <span class="kw">let </span>rotation = query.<span class="number">1 </span>.<span class="number">0</span>;
+                                <span class="self">self</span>.advice[column_index]
+                                    [(row <span class="kw">as </span>i32 + n + rotation) <span class="kw">as </span>usize % n <span class="kw">as </span>usize]
+                                    .into()
+                            },
+                            <span class="kw-2">&amp;</span>|query| {
+                                <span class="kw">let </span>query = <span class="self">self</span>.cs.instance_queries[query.index.unwrap()];
+                                <span class="kw">let </span>column_index = query.<span class="number">0</span>.index();
+                                <span class="kw">let </span>rotation = query.<span class="number">1 </span>.<span class="number">0</span>;
+                                Value::Real(
+                                    <span class="self">self</span>.instance[column_index]
+                                        [(row <span class="kw">as </span>i32 + n + rotation) <span class="kw">as </span>usize % n <span class="kw">as </span>usize]
+                                        .value(),
+                                )
+                            },
+                            <span class="kw-2">&amp;</span>|challenge| Value::Real(<span class="self">self</span>.challenges[challenge.index()]),
+                            <span class="kw-2">&amp;</span>|a| -a,
+                            <span class="kw-2">&amp;</span>|a, b| a + b,
+                            <span class="kw-2">&amp;</span>|a, b| a * b,
+                            <span class="kw-2">&amp;</span>|a, scalar| a * scalar,
+                            <span class="kw-2">&amp;</span>Value::Real(F::ZERO),
+                        )
+                    };
+
+                    <span class="kw">for </span>input_expressions <span class="kw">in </span>lookup.inputs_expressions.iter() {
+                        <span class="macro">assert!</span>(lookup.table_expressions.len() == input_expressions.len());
+                    }
                     <span class="macro">assert!</span>(<span class="self">self</span>.usable_rows.end &gt; <span class="number">0</span>);
 
                     <span class="comment">// We optimize on the basis that the table might have been filled so that the last
@@ -3292,48 +3424,52 @@
                     }
                     <span class="kw">let </span>table = <span class="kw-2">&amp;</span>cached_table;
 
-                    <span class="kw">let </span><span class="kw-2">mut </span>inputs: Vec&lt;(Vec&lt;<span class="kw">_</span>&gt;, usize)&gt; = lookup_input_row_ids
-                        .clone()
-                        .filter_map(|input_row| {
-                            <span class="kw">let </span>t = lookup
-                                .input_expressions
-                                .iter()
-                                .map(<span class="kw">move </span>|c| load(c, input_row))
-                                .collect();
-
-                            <span class="kw">if </span>t != fill_row {
-                                <span class="comment">// Also keep track of the original input row, since we&#39;re going to sort.
-                                </span><span class="prelude-val">Some</span>((t, input_row))
-                            } <span class="kw">else </span>{
-                                <span class="prelude-val">None
-                            </span>}
-                        })
-                        .collect();
-                    inputs.sort_unstable();
-
-                    <span class="kw">let </span><span class="kw-2">mut </span>i = <span class="number">0</span>;
-                    inputs
+                    lookup
+                        .inputs_expressions
                         .iter()
-                        .filter_map(<span class="kw">move </span>|(input, input_row)| {
-                            <span class="kw">while </span>i &lt; table.len() &amp;&amp; <span class="kw-2">&amp;</span>table[i] &lt; input {
-                                i += <span class="number">1</span>;
-                            }
-                            <span class="kw">if </span>i == table.len() || <span class="kw-2">&amp;</span>table[i] &gt; input {
-                                <span class="macro">assert!</span>(table.binary_search(input).is_err());
+                        .map(|input_expressions| {
+                            <span class="kw">let </span><span class="kw-2">mut </span>inputs: Vec&lt;(Vec&lt;<span class="kw">_</span>&gt;, usize)&gt; = lookup_input_row_ids
+                                .clone()
+                                .filter_map(|input_row| {
+                                    <span class="kw">let </span>t = input_expressions
+                                        .iter()
+                                        .map(<span class="kw">move </span>|c| load(c, input_row))
+                                        .collect();
 
-                                <span class="prelude-val">Some</span>(VerifyFailure::Lookup {
-                                    name: lookup.name.clone(),
-                                    lookup_index,
-                                    location: FailureLocation::find_expressions(
-                                        <span class="kw-2">&amp;</span><span class="self">self</span>.cs,
-                                        <span class="kw-2">&amp;</span><span class="self">self</span>.regions,
-                                        <span class="kw-2">*</span>input_row,
-                                        lookup.input_expressions.iter(),
-                                    ),
+                                    <span class="kw">if </span>t != fill_row {
+                                        <span class="comment">// Also keep track of the original input row, since we&#39;re going to sort.
+                                        </span><span class="prelude-val">Some</span>((t, input_row))
+                                    } <span class="kw">else </span>{
+                                        <span class="prelude-val">None
+                                    </span>}
                                 })
-                            } <span class="kw">else </span>{
-                                <span class="prelude-val">None
-                            </span>}
+                                .collect();
+                            inputs.sort_unstable();
+
+                            <span class="kw">let </span><span class="kw-2">mut </span>i = <span class="number">0</span>;
+                            inputs
+                                .iter()
+                                .filter_map(<span class="kw">move </span>|(input, input_row)| {
+                                    <span class="kw">while </span>i &lt; table.len() &amp;&amp; <span class="kw-2">&amp;</span>table[i] &lt; input {
+                                        i += <span class="number">1</span>;
+                                    }
+                                    <span class="kw">if </span>i == table.len() || <span class="kw-2">&amp;</span>table[i] &gt; input {
+                                        <span class="macro">assert!</span>(table.binary_search(input).is_err());
+
+                                        <span class="prelude-val">Some</span>(VerifyFailure::Lookup {
+                                            lookup_index,
+                                            location: FailureLocation::find_expressions(
+                                                <span class="kw-2">&amp;</span><span class="self">self</span>.cs,
+                                                <span class="kw-2">&amp;</span><span class="self">self</span>.regions,
+                                                <span class="kw-2">*</span>input_row,
+                                                input_expressions.iter(),
+                                            ),
+                                        })
+                                    } <span class="kw">else </span>{
+                                        <span class="prelude-val">None
+                                    </span>}
+                                })
+                                .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
                         })
                         .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
                 });
@@ -3364,6 +3500,7 @@
                     <span class="kw">let </span><span class="kw-2">mut </span>input_rows: Vec&lt;(Vec&lt;Value&lt;F&gt;&gt;, usize)&gt; = <span class="self">self
                         </span>.usable_rows
                         .clone()
+                        .into_iter()
                         .map(|input_row| {
                             <span class="kw">let </span>t = shuffle
                                 .input_expressions
@@ -3449,7 +3586,7 @@
         <span class="kw">let </span><span class="kw-2">mut </span>errors: Vec&lt;<span class="kw">_</span>&gt; = iter::empty()
             .chain(selector_errors)
             .chain(gate_errors)
-            .chain(lookup_errors)
+            .chain(lookup_errors.flatten())
             .chain(perm_errors)
             .chain(shuffle_errors)
             .collect();
@@ -3699,7 +3836,39 @@
                 .iter()
                 .enumerate()
                 .flat_map(|(lookup_index, lookup)| {
-                    <span class="macro">assert!</span>(lookup.table_expressions.len() == lookup.input_expressions.len());
+                    <span class="kw">let </span>load = |expression: <span class="kw-2">&amp;</span>Expression&lt;F&gt;, row| {
+                        expression.evaluate_lazy(
+                            <span class="kw-2">&amp;</span>|scalar| Value::Real(scalar),
+                            <span class="kw-2">&amp;</span>|<span class="kw">_</span>| <span class="macro">panic!</span>(<span class="string">&quot;virtual selectors are removed during optimization&quot;</span>),
+                            <span class="kw-2">&amp;</span>|query| {
+                                <span class="self">self</span>.fixed[query.column_index]
+                                    [(row <span class="kw">as </span>i32 + n + query.rotation.<span class="number">0</span>) <span class="kw">as </span>usize % n <span class="kw">as </span>usize]
+                                    .into()
+                            },
+                            <span class="kw-2">&amp;</span>|query| {
+                                <span class="self">self</span>.advice[query.column_index]
+                                    [(row <span class="kw">as </span>i32 + n + query.rotation.<span class="number">0</span>) <span class="kw">as </span>usize % n <span class="kw">as </span>usize]
+                                    .into()
+                            },
+                            <span class="kw-2">&amp;</span>|query| {
+                                Value::Real(
+                                    <span class="self">self</span>.instance[query.column_index]
+                                        [(row <span class="kw">as </span>i32 + n + query.rotation.<span class="number">0</span>) <span class="kw">as </span>usize % n <span class="kw">as </span>usize]
+                                        .value(),
+                                )
+                            },
+                            <span class="kw-2">&amp;</span>|challenge| Value::Real(<span class="self">self</span>.challenges[challenge.index()]),
+                            <span class="kw-2">&amp;</span>|a| -a,
+                            <span class="kw-2">&amp;</span>|a, b| a + b,
+                            <span class="kw-2">&amp;</span>|a, b| a * b,
+                            <span class="kw-2">&amp;</span>|a, scalar| a * scalar,
+                            <span class="kw-2">&amp;</span>Value::Real(F::ZERO),
+                        )
+                    };
+
+                    <span class="kw">for </span>input_expressions <span class="kw">in </span>lookup.inputs_expressions.iter() {
+                        <span class="macro">assert!</span>(lookup.table_expressions.len() == input_expressions.len());
+                    }
                     <span class="macro">assert!</span>(<span class="self">self</span>.usable_rows.end &gt; <span class="number">0</span>);
 
                     <span class="comment">// We optimize on the basis that the table might have been filled so that the last
@@ -3746,43 +3915,47 @@
                     }
                     <span class="kw">let </span>table = <span class="kw-2">&amp;</span>cached_table;
 
-                    <span class="kw">let </span><span class="kw-2">mut </span>inputs: Vec&lt;(Vec&lt;<span class="kw">_</span>&gt;, usize)&gt; = lookup_input_row_ids
-                        .clone()
-                        .into_par_iter()
-                        .filter_map(|input_row| {
-                            <span class="kw">let </span>t = lookup
-                                .input_expressions
-                                .iter()
-                                .map(<span class="kw">move </span>|c| load(c, input_row))
-                                .collect();
+                    lookup
+                        .inputs_expressions
+                        .iter()
+                        .map(|input_expressions| {
+                            <span class="kw">let </span><span class="kw-2">mut </span>inputs: Vec&lt;(Vec&lt;<span class="kw">_</span>&gt;, usize)&gt; = lookup_input_row_ids
+                                .clone()
+                                .into_par_iter()
+                                .filter_map(|input_row| {
+                                    <span class="kw">let </span>t = input_expressions
+                                        .iter()
+                                        .map(<span class="kw">move </span>|c| load(c, input_row))
+                                        .collect();
 
-                            <span class="kw">if </span>t != fill_row {
-                                <span class="comment">// Also keep track of the original input row, since we&#39;re going to sort.
-                                </span><span class="prelude-val">Some</span>((t, input_row))
-                            } <span class="kw">else </span>{
-                                <span class="prelude-val">None
-                            </span>}
-                        })
-                        .collect();
-                    inputs.par_sort_unstable();
-
-                    inputs
-                        .par_iter()
-                        .filter_map(<span class="kw">move </span>|(input, input_row)| {
-                            <span class="kw">if </span>table.binary_search(input).is_err() {
-                                <span class="prelude-val">Some</span>(VerifyFailure::Lookup {
-                                    name: lookup.name.clone(),
-                                    lookup_index,
-                                    location: FailureLocation::find_expressions(
-                                        <span class="kw-2">&amp;</span><span class="self">self</span>.cs,
-                                        <span class="kw-2">&amp;</span><span class="self">self</span>.regions,
-                                        <span class="kw-2">*</span>input_row,
-                                        lookup.input_expressions.iter(),
-                                    ),
+                                    <span class="kw">if </span>t != fill_row {
+                                        <span class="comment">// Also keep track of the original input row, since we&#39;re going to sort.
+                                        </span><span class="prelude-val">Some</span>((t, input_row))
+                                    } <span class="kw">else </span>{
+                                        <span class="prelude-val">None
+                                    </span>}
                                 })
-                            } <span class="kw">else </span>{
-                                <span class="prelude-val">None
-                            </span>}
+                                .collect();
+                            inputs.par_sort_unstable();
+
+                            inputs
+                                .par_iter()
+                                .filter_map(<span class="kw">move </span>|(input, input_row)| {
+                                    <span class="kw">if </span>table.binary_search(input).is_err() {
+                                        <span class="prelude-val">Some</span>(VerifyFailure::Lookup {
+                                            lookup_index,
+                                            location: FailureLocation::find_expressions(
+                                                <span class="kw-2">&amp;</span><span class="self">self</span>.cs,
+                                                <span class="kw-2">&amp;</span><span class="self">self</span>.regions,
+                                                <span class="kw-2">*</span>input_row,
+                                                input_expressions.iter(),
+                                            ),
+                                        })
+                                    } <span class="kw">else </span>{
+                                        <span class="prelude-val">None
+                                    </span>}
+                                })
+                                .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
                         })
                         .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
                 });
@@ -3813,6 +3986,7 @@
                     <span class="kw">let </span><span class="kw-2">mut </span>input_rows: Vec&lt;(Vec&lt;Value&lt;F&gt;&gt;, usize)&gt; = <span class="self">self
                         </span>.usable_rows
                         .clone()
+                        .into_iter()
                         .map(|input_row| {
                             <span class="kw">let </span>t = shuffle
                                 .input_expressions
@@ -3898,7 +4072,7 @@
         <span class="kw">let </span><span class="kw-2">mut </span>errors: Vec&lt;<span class="kw">_</span>&gt; = iter::empty()
             .chain(selector_errors)
             .chain(gate_errors)
-            .chain(lookup_errors)
+            .chain(lookup_errors.flatten())
             .chain(perm_errors)
             .chain(shuffle_errors)
             .collect();
@@ -4260,7 +4434,6 @@
         <span class="macro">assert_eq!</span>(
             prover.verify(),
             <span class="prelude-val">Err</span>(<span class="macro">vec!</span>[VerifyFailure::Lookup {
-                name: <span class="string">&quot;lookup&quot;</span>.to_string(),
                 lookup_index: <span class="number">0</span>,
                 location: FailureLocation::InRegion {
                     region: (<span class="number">1</span>, <span class="string">&quot;Faulty synthesis&quot;</span>).into(),
@@ -4394,7 +4567,6 @@
         <span class="macro">assert_eq!</span>(
             prover.verify(),
             <span class="prelude-val">Err</span>(<span class="macro">vec!</span>[VerifyFailure::Lookup {
-                name: <span class="string">&quot;lookup&quot;</span>.to_string(),
                 lookup_index: <span class="number">0</span>,
                 location: FailureLocation::InRegion {
                     region: (<span class="number">2</span>, <span class="string">&quot;Faulty synthesis&quot;</span>).into(),

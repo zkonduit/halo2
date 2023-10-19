@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `halo2_proofs/src/plonk/circuit.rs`."><title>circuit.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-deb46770fd761b69.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="halo2_proofs" data-themes="" data-resource-suffix="" data-rustdoc-version="1.75.0-nightly (42b1224e9 2023-10-15)" data-channel="nightly" data-search-js="search-8fbf244ebcf71464.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f34af1a0ee6bacd.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-2c020d218678b618.svg"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/katex.min.css" integrity="sha384-9eLZqc9ds8eNjO3TmqPeYcDj8n+Qfa4nuSiGYa6DjLNcv9BtN69ZIulL9+8CqC9Y" crossorigin="anonymous">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `halo2_proofs/src/plonk/circuit.rs`."><title>circuit.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-deb46770fd761b69.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="halo2_proofs" data-themes="" data-resource-suffix="" data-rustdoc-version="1.75.0-nightly (0039d739d 2023-10-18)" data-channel="nightly" data-search-js="search-8fbf244ebcf71464.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5f34af1a0ee6bacd.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-2c020d218678b618.svg"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/katex.min.css" integrity="sha384-9eLZqc9ds8eNjO3TmqPeYcDj8n+Qfa4nuSiGYa6DjLNcv9BtN69ZIulL9+8CqC9Y" crossorigin="anonymous">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/katex.min.js"                  integrity="sha384-K3vbOmF2BtaVai+Qk37uypf7VrgBubhQreNQe9aGsz9lB63dIFiQVlJbr92dw2Lx" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/contrib/auto-render.min.js"    integrity="sha384-kmZOZB5ObwgQnS/DuDg6TScgOiWWBiVt0plIRkZCmE6rDZGrEOQeHM5PcHi+nyqe" crossorigin="anonymous"></script>
 <script>
@@ -2513,7 +2513,102 @@
 <a href="#2498" id="2498">2498</a>
 <a href="#2499" id="2499">2499</a>
 <a href="#2500" id="2500">2500</a>
-</pre></div><pre class="rust"><code><span class="kw">use super</span>::{lookup, permutation, shuffle, Assigned, Error};
+<a href="#2501" id="2501">2501</a>
+<a href="#2502" id="2502">2502</a>
+<a href="#2503" id="2503">2503</a>
+<a href="#2504" id="2504">2504</a>
+<a href="#2505" id="2505">2505</a>
+<a href="#2506" id="2506">2506</a>
+<a href="#2507" id="2507">2507</a>
+<a href="#2508" id="2508">2508</a>
+<a href="#2509" id="2509">2509</a>
+<a href="#2510" id="2510">2510</a>
+<a href="#2511" id="2511">2511</a>
+<a href="#2512" id="2512">2512</a>
+<a href="#2513" id="2513">2513</a>
+<a href="#2514" id="2514">2514</a>
+<a href="#2515" id="2515">2515</a>
+<a href="#2516" id="2516">2516</a>
+<a href="#2517" id="2517">2517</a>
+<a href="#2518" id="2518">2518</a>
+<a href="#2519" id="2519">2519</a>
+<a href="#2520" id="2520">2520</a>
+<a href="#2521" id="2521">2521</a>
+<a href="#2522" id="2522">2522</a>
+<a href="#2523" id="2523">2523</a>
+<a href="#2524" id="2524">2524</a>
+<a href="#2525" id="2525">2525</a>
+<a href="#2526" id="2526">2526</a>
+<a href="#2527" id="2527">2527</a>
+<a href="#2528" id="2528">2528</a>
+<a href="#2529" id="2529">2529</a>
+<a href="#2530" id="2530">2530</a>
+<a href="#2531" id="2531">2531</a>
+<a href="#2532" id="2532">2532</a>
+<a href="#2533" id="2533">2533</a>
+<a href="#2534" id="2534">2534</a>
+<a href="#2535" id="2535">2535</a>
+<a href="#2536" id="2536">2536</a>
+<a href="#2537" id="2537">2537</a>
+<a href="#2538" id="2538">2538</a>
+<a href="#2539" id="2539">2539</a>
+<a href="#2540" id="2540">2540</a>
+<a href="#2541" id="2541">2541</a>
+<a href="#2542" id="2542">2542</a>
+<a href="#2543" id="2543">2543</a>
+<a href="#2544" id="2544">2544</a>
+<a href="#2545" id="2545">2545</a>
+<a href="#2546" id="2546">2546</a>
+<a href="#2547" id="2547">2547</a>
+<a href="#2548" id="2548">2548</a>
+<a href="#2549" id="2549">2549</a>
+<a href="#2550" id="2550">2550</a>
+<a href="#2551" id="2551">2551</a>
+<a href="#2552" id="2552">2552</a>
+<a href="#2553" id="2553">2553</a>
+<a href="#2554" id="2554">2554</a>
+<a href="#2555" id="2555">2555</a>
+<a href="#2556" id="2556">2556</a>
+<a href="#2557" id="2557">2557</a>
+<a href="#2558" id="2558">2558</a>
+<a href="#2559" id="2559">2559</a>
+<a href="#2560" id="2560">2560</a>
+<a href="#2561" id="2561">2561</a>
+<a href="#2562" id="2562">2562</a>
+<a href="#2563" id="2563">2563</a>
+<a href="#2564" id="2564">2564</a>
+<a href="#2565" id="2565">2565</a>
+<a href="#2566" id="2566">2566</a>
+<a href="#2567" id="2567">2567</a>
+<a href="#2568" id="2568">2568</a>
+<a href="#2569" id="2569">2569</a>
+<a href="#2570" id="2570">2570</a>
+<a href="#2571" id="2571">2571</a>
+<a href="#2572" id="2572">2572</a>
+<a href="#2573" id="2573">2573</a>
+<a href="#2574" id="2574">2574</a>
+<a href="#2575" id="2575">2575</a>
+<a href="#2576" id="2576">2576</a>
+<a href="#2577" id="2577">2577</a>
+<a href="#2578" id="2578">2578</a>
+<a href="#2579" id="2579">2579</a>
+<a href="#2580" id="2580">2580</a>
+<a href="#2581" id="2581">2581</a>
+<a href="#2582" id="2582">2582</a>
+<a href="#2583" id="2583">2583</a>
+<a href="#2584" id="2584">2584</a>
+<a href="#2585" id="2585">2585</a>
+<a href="#2586" id="2586">2586</a>
+<a href="#2587" id="2587">2587</a>
+<a href="#2588" id="2588">2588</a>
+<a href="#2589" id="2589">2589</a>
+<a href="#2590" id="2590">2590</a>
+<a href="#2591" id="2591">2591</a>
+<a href="#2592" id="2592">2592</a>
+<a href="#2593" id="2593">2593</a>
+<a href="#2594" id="2594">2594</a>
+<a href="#2595" id="2595">2595</a>
+</pre></div><pre class="rust"><code><span class="kw">use super</span>::{mv_lookup, permutation, shuffle, Assigned, Error};
 <span class="kw">use </span><span class="kw">crate</span>::circuit::layouter::SyncDeps;
 <span class="kw">use </span><span class="kw">crate</span>::dev::metadata;
 <span class="kw">use crate</span>::{
@@ -2524,7 +2619,7 @@
 <span class="kw">use </span>core::ops::{Add, Mul};
 <span class="kw">use </span>ff::Field;
 <span class="kw">use </span>sealed::SealedPhase;
-<span class="kw">use </span>std::collections::HashMap;
+<span class="kw">use </span>std::collections::{BTreeMap, HashMap};
 <span class="kw">use </span>std::fmt::Debug;
 <span class="kw">use </span>std::iter::{Product, Sum};
 <span class="kw">use </span>std::{
@@ -3092,7 +3187,7 @@
 }
 
 <span class="kw">impl </span>TableColumn {
-    <span class="doccomment">/// Returns inner column
+    <span class="doccomment">///
     </span><span class="kw">pub fn </span>inner(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Column&lt;Fixed&gt; {
         <span class="self">self</span>.inner
     }
@@ -4060,6 +4155,13 @@
     }
 }
 
+<span class="doccomment">/// TODO doc
+</span><span class="attr">#[derive(Debug, Clone)]
+</span><span class="kw">pub struct </span>LookupTracker&lt;F: Field&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) table: Vec&lt;Expression&lt;F&gt;&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) inputs: Vec&lt;Vec&lt;Expression&lt;F&gt;&gt;&gt;,
+}
+
 <span class="doccomment">/// This is a description of the circuit environment, such as the gate, column and
 /// permutation arrangements.
 </span><span class="attr">#[derive(Debug, Clone)]
@@ -4092,9 +4194,12 @@
     <span class="comment">// Permutation argument for performing equality constraints
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) permutation: permutation::Argument,
 
+    <span class="doccomment">/// Map from table expression to vec of vec of input expressions
+    </span><span class="kw">pub </span>lookups_map: BTreeMap&lt;String, LookupTracker&lt;F&gt;&gt;,
+
     <span class="comment">// Vector of lookup arguments, where each corresponds to a sequence of
     // input expressions and a sequence of table expressions involved in the lookup.
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) lookups: Vec&lt;lookup::Argument&lt;F&gt;&gt;,
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) lookups: Vec&lt;mv_lookup::Argument&lt;F&gt;&gt;,
 
     <span class="comment">// Vector of shuffle arguments, where each corresponds to a sequence of
     // input expressions and a sequence of shuffle expressions involved in the shuffle.
@@ -4125,7 +4230,7 @@
     instance_queries: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Vec&lt;(Column&lt;Instance&gt;, Rotation)&gt;,
     fixed_queries: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Vec&lt;(Column&lt;Fixed&gt;, Rotation)&gt;,
     permutation: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>permutation::Argument,
-    lookups: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Vec&lt;lookup::Argument&lt;F&gt;&gt;,
+    lookups_map: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>BTreeMap&lt;String, LookupTracker&lt;F&gt;&gt;,
     shuffles: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Vec&lt;shuffle::Argument&lt;F&gt;&gt;,
     constants: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Vec&lt;Column&lt;Fixed&gt;&gt;,
     minimum_degree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="prelude-ty">Option</span>&lt;usize&gt;,
@@ -4152,7 +4257,7 @@
             .field(<span class="string">&quot;instance_queries&quot;</span>, <span class="self">self</span>.instance_queries)
             .field(<span class="string">&quot;fixed_queries&quot;</span>, <span class="self">self</span>.fixed_queries)
             .field(<span class="string">&quot;permutation&quot;</span>, <span class="self">self</span>.permutation)
-            .field(<span class="string">&quot;lookups&quot;</span>, <span class="self">self</span>.lookups)
+            .field(<span class="string">&quot;lookups_map&quot;</span>, <span class="self">self</span>.lookups_map)
             .field(<span class="string">&quot;constants&quot;</span>, <span class="self">self</span>.constants)
             .field(<span class="string">&quot;minimum_degree&quot;</span>, <span class="self">self</span>.minimum_degree);
         debug_struct.finish()
@@ -4186,6 +4291,7 @@
             num_advice_queries: Vec::new(),
             instance_queries: Vec::new(),
             permutation: permutation::Argument::new(),
+            lookups_map: BTreeMap::default(),
             lookups: Vec::new(),
             shuffles: Vec::new(),
             general_column_annotations: HashMap::new(),
@@ -4213,7 +4319,7 @@
             advice_queries: <span class="kw-2">&amp;</span><span class="self">self</span>.advice_queries,
             instance_queries: <span class="kw-2">&amp;</span><span class="self">self</span>.instance_queries,
             permutation: <span class="kw-2">&amp;</span><span class="self">self</span>.permutation,
-            lookups: <span class="kw-2">&amp;</span><span class="self">self</span>.lookups,
+            lookups_map: <span class="kw-2">&amp;</span><span class="self">self</span>.lookups_map,
             shuffles: <span class="kw-2">&amp;</span><span class="self">self</span>.shuffles,
             constants: <span class="kw-2">&amp;</span><span class="self">self</span>.constants,
             minimum_degree: <span class="kw-2">&amp;</span><span class="self">self</span>.minimum_degree,
@@ -4243,56 +4349,130 @@
     ///
     /// `table_map` returns a map between input expressions and the table columns
     /// they need to match.
-    </span><span class="kw">pub fn </span>lookup&lt;S: AsRef&lt;str&gt;&gt;(
+    </span><span class="kw">pub fn </span>lookup(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        name: S,
+        <span class="comment">// FIXME use name in debug messages
+        </span>name: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span>str,
         table_map: <span class="kw">impl </span>FnOnce(<span class="kw-2">&amp;mut </span>VirtualCells&lt;<span class="lifetime">&#39;_</span>, F&gt;) -&gt; Vec&lt;(Expression&lt;F&gt;, TableColumn)&gt;,
-    ) -&gt; usize {
+    ) {
         <span class="kw">let </span><span class="kw-2">mut </span>cells = VirtualCells::new(<span class="self">self</span>);
-        <span class="kw">let </span>table_map = table_map(<span class="kw-2">&amp;mut </span>cells)
+        <span class="kw">let </span>table_map: Vec&lt;<span class="kw">_</span>&gt; = table_map(<span class="kw-2">&amp;mut </span>cells)
             .into_iter()
-            .map(|(<span class="kw-2">mut </span>input, table)| {
+            .map(|(input, table)| {
                 <span class="kw">if </span>input.contains_simple_selector() {
                     <span class="macro">panic!</span>(<span class="string">&quot;expression containing simple selector supplied to lookup argument&quot;</span>);
                 }
-                <span class="kw">let </span><span class="kw-2">mut </span>table = cells.query_fixed(table.inner(), Rotation::cur());
-                input.query_cells(<span class="kw-2">&amp;mut </span>cells);
-                table.query_cells(<span class="kw-2">&amp;mut </span>cells);
+
+                <span class="kw">let </span>table = cells.query_fixed(table.inner(), Rotation::cur());
+
                 (input, table)
             })
             .collect();
-        <span class="kw">let </span>index = <span class="self">self</span>.lookups.len();
 
-        <span class="self">self</span>.lookups
-            .push(lookup::Argument::new(name.as_ref(), table_map));
+        <span class="kw">let </span>(input_expressions, table_expressions): (Vec&lt;<span class="kw">_</span>&gt;, Vec&lt;<span class="kw">_</span>&gt;) =
+            table_map.into_iter().unzip();
+        <span class="kw">let </span>table_expressions_identifier = table_expressions
+            .iter()
+            .fold(String::new(), |string, expr| string + <span class="kw-2">&amp;</span>expr.identifier());
 
-        index
+        <span class="self">self</span>.lookups_map
+            .entry(table_expressions_identifier)
+            .and_modify(|table_tracker| table_tracker.inputs.push(input_expressions.clone()))
+            .or_insert(LookupTracker {
+                table: table_expressions,
+                inputs: <span class="macro">vec!</span>[input_expressions],
+            });
     }
+
+    <span class="doccomment">/// Chunk lookup arguments into pieces below a given degree bound
+    </span><span class="kw">pub fn </span>chunk_lookups(<span class="kw-2">mut </span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
+        <span class="kw">if </span><span class="self">self</span>.lookups_map.is_empty() {
+            <span class="kw">return </span><span class="self">self</span>;
+        }
+
+        <span class="kw">let </span>max_gate_degree = <span class="self">self</span>.max_gate_degree();
+        <span class="macro">log::debug!</span>(<span class="string">&quot;max gate degree: {}&quot;</span>, max_gate_degree);
+        <span class="kw">let </span>max_single_lookup_degree: usize = <span class="self">self
+            </span>.lookups_map
+            .values()
+            .map(|v| {
+                <span class="kw">let </span>table_degree = v.table.iter().map(|expr| expr.degree()).max().unwrap();
+                <span class="kw">let </span>base_lookup_degree = <span class="kw">super</span>::mv_lookup::base_degree(table_degree);
+
+                <span class="kw">let </span>max_inputs_degree: usize = v
+                    .inputs
+                    .iter()
+                    .map(|input| input.iter().map(|expr| expr.degree()).max().unwrap())
+                    .max()
+                    .unwrap();
+
+                mv_lookup::degree_with_input(base_lookup_degree, max_inputs_degree)
+            })
+            .max()
+            .unwrap();
+        <span class="macro">log::debug!</span>(<span class="string">&quot;max single lookup degree: {}&quot;</span>, max_gate_degree);
+
+        <span class="kw">let </span>minimum_degree = std::cmp::max(max_gate_degree, max_single_lookup_degree);
+        <span class="comment">// TODO: Find the best degree that needs least commitment
+        // let minimum_degree = (minimum_degree as u64 - 1).next_power_of_two() as usize + 1;
+
+        </span><span class="macro">log::trace!</span>(<span class="string">&quot;minimum degree: {}&quot;</span>, minimum_degree);
+
+        <span class="kw">let </span><span class="kw-2">mut </span>lookups: Vec&lt;<span class="kw">_</span>&gt; = <span class="macro">vec!</span>[];
+        <span class="kw">for </span>v <span class="kw">in </span><span class="self">self</span>.lookups_map.values() {
+            <span class="kw">let </span>LookupTracker { table, inputs } = v;
+            <span class="kw">let </span><span class="kw-2">mut </span>args = <span class="macro">vec!</span>[<span class="kw">super</span>::mv_lookup::Argument::new(table, <span class="kw-2">&amp;</span>[inputs[<span class="number">0</span>].clone()])];
+
+            <span class="kw">for </span>input <span class="kw">in </span>inputs.iter().skip(<span class="number">1</span>) {
+                <span class="kw">let </span>cur_input_degree = input.iter().map(|expr| expr.degree()).max().unwrap();
+                <span class="kw">let </span><span class="kw-2">mut </span>indicator = <span class="bool-val">false</span>;
+                <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..args.len() {
+                    <span class="comment">// try to fit input in one of the args
+                    </span><span class="kw">let </span>cur_argument_degree = args[i].required_degree();
+                    <span class="kw">let </span>new_potential_degree = cur_argument_degree + cur_input_degree;
+                    <span class="kw">if </span>new_potential_degree &lt;= minimum_degree {
+                        args[i].inputs_expressions.push(input.clone());
+                        indicator = <span class="bool-val">true</span>;
+                        <span class="kw">break</span>;
+                    }
+                }
+
+                <span class="kw">if </span>!indicator {
+                    args.push(<span class="kw">super</span>::mv_lookup::Argument::new(table, <span class="kw-2">&amp;</span>[input.clone()]))
+                }
+            }
+            lookups.append(<span class="kw-2">&amp;mut </span>args);
+        }
+        <span class="self">self</span>.lookups = lookups;
+        <span class="self">self
+    </span>}
 
     <span class="doccomment">/// Add a lookup argument for some input expressions and table expressions.
     ///
     /// `table_map` returns a map between input expressions and the table expressions
     /// they need to match.
-    </span><span class="kw">pub fn </span>lookup_any&lt;S: AsRef&lt;str&gt;&gt;(
+    </span><span class="kw">pub fn </span>lookup_any(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        name: S,
+        <span class="comment">// FIXME use name in debug messages
+        </span>name: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span>str,
         table_map: <span class="kw">impl </span>FnOnce(<span class="kw-2">&amp;mut </span>VirtualCells&lt;<span class="lifetime">&#39;_</span>, F&gt;) -&gt; Vec&lt;(Expression&lt;F&gt;, Expression&lt;F&gt;)&gt;,
-    ) -&gt; usize {
+    ) {
         <span class="kw">let </span><span class="kw-2">mut </span>cells = VirtualCells::new(<span class="self">self</span>);
-        <span class="kw">let </span>table_map = table_map(<span class="kw-2">&amp;mut </span>cells)
-            .into_iter()
-            .map(|(<span class="kw-2">mut </span>input, <span class="kw-2">mut </span>table)| {
-                input.query_cells(<span class="kw-2">&amp;mut </span>cells);
-                table.query_cells(<span class="kw-2">&amp;mut </span>cells);
-                (input, table)
-            })
-            .collect();
-        <span class="kw">let </span>index = <span class="self">self</span>.lookups.len();
+        <span class="kw">let </span>table_map = table_map(<span class="kw-2">&amp;mut </span>cells);
 
-        <span class="self">self</span>.lookups
-            .push(lookup::Argument::new(name.as_ref(), table_map));
+        <span class="kw">let </span>(input_expressions, table_expressions): (Vec&lt;<span class="kw">_</span>&gt;, Vec&lt;<span class="kw">_</span>&gt;) =
+            table_map.into_iter().unzip();
+        <span class="kw">let </span>table_expressions_identifier = table_expressions
+            .iter()
+            .fold(String::new(), |string, expr| string + <span class="kw-2">&amp;</span>expr.identifier());
 
-        index
+        <span class="self">self</span>.lookups_map
+            .entry(table_expressions_identifier)
+            .and_modify(|table_tracker| table_tracker.inputs.push(input_expressions.clone()))
+            .or_insert(LookupTracker {
+                table: table_expressions,
+                inputs: <span class="macro">vec!</span>[input_expressions],
+            });
     }
 
     <span class="doccomment">/// Add a shuffle argument for some input expressions and table expressions.
@@ -4572,8 +4752,9 @@
         // lookup expressions
         </span><span class="kw">for </span>expr <span class="kw">in </span><span class="self">self</span>.lookups.iter_mut().flat_map(|lookup| {
             lookup
-                .input_expressions
+                .inputs_expressions
                 .iter_mut()
+                .flatten()
                 .chain(lookup.table_expressions.iter_mut())
         }) {
             replace_selectors(expr, <span class="kw-2">&amp;</span>selector_replacements, <span class="bool-val">true</span>);
@@ -4731,6 +4912,15 @@
         (<span class="number">0</span>..=max_phase).map(sealed::Phase)
     }
 
+    <span class="doccomment">/// Compute the maximum degree of gates in the constraint system
+    </span><span class="kw">pub fn </span>max_gate_degree(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.gates
+            .iter()
+            .flat_map(|gate| gate.polynomials().iter().map(|poly| poly.degree()))
+            .max()
+            .unwrap_or(<span class="number">0</span>)
+    }
+
     <span class="doccomment">/// Compute the degree of the constraint system (the maximum degree of all
     /// constraints).
     </span><span class="kw">pub fn </span>degree(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
@@ -4884,7 +5074,7 @@
     }
 
     <span class="doccomment">/// Returns lookup arguments
-    </span><span class="kw">pub fn </span>lookups(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Vec&lt;lookup::Argument&lt;F&gt;&gt; {
+    </span><span class="kw">pub fn </span>lookups(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Vec&lt;mv_lookup::Argument&lt;F&gt;&gt; {
         <span class="kw-2">&amp;</span><span class="self">self</span>.lookups
     }
 
