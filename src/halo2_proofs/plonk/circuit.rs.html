@@ -2608,6 +2608,17 @@
 <a href="#2593" id="2593">2593</a>
 <a href="#2594" id="2594">2594</a>
 <a href="#2595" id="2595">2595</a>
+<a href="#2596" id="2596">2596</a>
+<a href="#2597" id="2597">2597</a>
+<a href="#2598" id="2598">2598</a>
+<a href="#2599" id="2599">2599</a>
+<a href="#2600" id="2600">2600</a>
+<a href="#2601" id="2601">2601</a>
+<a href="#2602" id="2602">2602</a>
+<a href="#2603" id="2603">2603</a>
+<a href="#2604" id="2604">2604</a>
+<a href="#2605" id="2605">2605</a>
+<a href="#2606" id="2606">2606</a>
 </pre></div><pre class="rust"><code><span class="kw">use super</span>::{mv_lookup, permutation, shuffle, Assigned, Error};
 <span class="kw">use </span><span class="kw">crate</span>::circuit::layouter::SyncDeps;
 <span class="kw">use </span><span class="kw">crate</span>::dev::metadata;
@@ -2904,7 +2915,7 @@
 <span class="kw">impl </span>ColumnType <span class="kw">for </span>Any {
     <span class="kw">fn </span>query_cell&lt;F: Field&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, index: usize, at: Rotation) -&gt; Expression&lt;F&gt; {
         <span class="kw">match </span><span class="self">self </span>{
-            Any::Advice(Advice { phase }) =&gt; Expression::Advice(AdviceQuery {
+            Any::Advice(Advice { phase, .. }) =&gt; Expression::Advice(AdviceQuery {
                 index: <span class="prelude-val">None</span>,
                 column_index: index,
                 rotation: at,
@@ -4172,6 +4183,8 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) num_selectors: usize,
     <span class="kw">pub</span>(<span class="kw">crate</span>) num_challenges: usize,
 
+    <span class="doccomment">/// Contains the index of each advice column that is unblinded.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) unblinded_advice_columns: Vec&lt;usize&gt;,
     <span class="doccomment">/// Contains the phase for each advice column. Should have same length as num_advice_columns.
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) advice_column_phase: Vec&lt;sealed::Phase&gt;,
     <span class="doccomment">/// Contains the phase for each challenge. Should have same length as num_challenges.
@@ -4282,6 +4295,7 @@
             num_instance_columns: <span class="number">0</span>,
             num_selectors: <span class="number">0</span>,
             num_challenges: <span class="number">0</span>,
+            unblinded_advice_columns: Vec::new(),
             advice_column_phase: Vec::new(),
             challenge_phase: Vec::new(),
             selector_map: <span class="macro">vec!</span>[],
@@ -4837,11 +4851,16 @@
 
     <span class="doccomment">/// Allocate a new advice column at `FirstPhase`
     </span><span class="kw">pub fn </span>advice_column(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Column&lt;Advice&gt; {
-        <span class="self">self</span>.advice_column_in(FirstPhase)
+        <span class="self">self</span>.advice_column_in(FirstPhase, <span class="bool-val">true</span>)
+    }
+
+    <span class="doccomment">/// Allocate a new unblinded advice column at `FirstPhase`
+    </span><span class="kw">pub fn </span>unblinded_advice_column(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Column&lt;Advice&gt; {
+        <span class="self">self</span>.advice_column_in(FirstPhase, <span class="bool-val">false</span>)
     }
 
     <span class="doccomment">/// Allocate a new advice column in given phase
-    </span><span class="kw">pub fn </span>advice_column_in&lt;P: Phase&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, phase: P) -&gt; Column&lt;Advice&gt; {
+    </span><span class="kw">pub fn </span>advice_column_in&lt;P: Phase&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, phase: P, blinded: bool) -&gt; Column&lt;Advice&gt; {
         <span class="kw">let </span>phase = phase.to_sealed();
         <span class="kw">if let </span><span class="prelude-val">Some</span>(previous_phase) = phase.prev() {
             <span class="self">self</span>.assert_phase_exists(
@@ -4855,6 +4874,9 @@
             column_type: Advice { phase },
         };
         <span class="self">self</span>.num_advice_columns += <span class="number">1</span>;
+        <span class="kw">if </span>!blinded {
+            <span class="self">self</span>.unblinded_advice_columns.push(tmp.index);
+        }
         <span class="self">self</span>.num_advice_queries.push(<span class="number">0</span>);
         <span class="self">self</span>.advice_column_phase.push(phase);
         tmp

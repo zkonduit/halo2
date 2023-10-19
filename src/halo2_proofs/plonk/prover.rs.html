@@ -800,6 +800,19 @@
 <a href="#785" id="785">785</a>
 <a href="#786" id="786">786</a>
 <a href="#787" id="787">787</a>
+<a href="#788" id="788">788</a>
+<a href="#789" id="789">789</a>
+<a href="#790" id="790">790</a>
+<a href="#791" id="791">791</a>
+<a href="#792" id="792">792</a>
+<a href="#793" id="793">793</a>
+<a href="#794" id="794">794</a>
+<a href="#795" id="795">795</a>
+<a href="#796" id="796">796</a>
+<a href="#797" id="797">797</a>
+<a href="#798" id="798">798</a>
+<a href="#799" id="799">799</a>
+<a href="#800" id="800">800</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>ff::{Field, FromUniformBytes, WithSmallOrderMulGroup};
 <span class="kw">use </span>group::Curve;
 <span class="kw">use </span>rand_core::RngCore;
@@ -959,6 +972,7 @@
         k: u32,
         current_phase: sealed::Phase,
         advice: Vec&lt;Polynomial&lt;Assigned&lt;F&gt;, LagrangeCoeff&gt;&gt;,
+        unblinded_advice: std::collections::HashSet&lt;usize&gt;,
         challenges: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>HashMap&lt;usize, F&gt;,
         instances: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[F]],
         usable_rows: RangeTo&lt;usize&gt;,
@@ -1131,6 +1145,9 @@
                     k: params.k(),
                     current_phase,
                     advice: <span class="macro">vec!</span>[domain.empty_lagrange_assigned(); meta.num_advice_columns],
+                    unblinded_advice: std::collections::HashSet::from_iter(
+                        meta.unblinded_advice_columns.clone().into_iter(),
+                    ),
                     instances,
                     challenges: <span class="kw-2">&amp;</span>challenges,
                     <span class="comment">// The prover will not be allowed to assign values to advice
@@ -1165,16 +1182,25 @@
                 );
 
                 <span class="comment">// Add blinding factors to advice columns
-                </span><span class="kw">for </span>advice_values <span class="kw">in </span><span class="kw-2">&amp;mut </span>advice_values {
+                </span><span class="kw">for </span>(column_index, advice_values) <span class="kw">in </span><span class="kw-2">&amp;mut </span>advice_values.iter_mut().enumerate() {
                     <span class="kw">for </span>cell <span class="kw">in </span><span class="kw-2">&amp;mut </span>advice_values[unusable_rows_start..] {
-                        <span class="kw-2">*</span>cell = Scheme::Scalar::random(<span class="kw-2">&amp;mut </span>rng);
+                        <span class="kw">if </span>witness.unblinded_advice.contains(<span class="kw-2">&amp;</span>column_index) {
+                            <span class="kw-2">*</span>cell = Blind::default().<span class="number">0</span>;
+                        } <span class="kw">else </span>{
+                            <span class="kw-2">*</span>cell = Scheme::Scalar::random(<span class="kw-2">&amp;mut </span>rng);
+                        }
                     }
                 }
 
                 <span class="comment">// Compute commitments to advice column polynomials
-                </span><span class="kw">let </span>blinds: Vec&lt;<span class="kw">_</span>&gt; = advice_values
-                    .iter()
-                    .map(|<span class="kw">_</span>| Blind(Scheme::Scalar::random(<span class="kw-2">&amp;mut </span>rng)))
+                </span><span class="kw">let </span>blinds: Vec&lt;<span class="kw">_</span>&gt; = (<span class="number">0</span>..meta.num_advice_columns)
+                    .map(|i| {
+                        <span class="kw">if </span>witness.unblinded_advice.contains(<span class="kw-2">&amp;</span>i) {
+                            Blind::default()
+                        } <span class="kw">else </span>{
+                            Blind(Scheme::Scalar::random(<span class="kw-2">&amp;mut </span>rng))
+                        }
+                    })
                     .collect();
                 <span class="kw">let </span>advice_commitments_projective: Vec&lt;<span class="kw">_</span>&gt; = advice_values
                     .iter()
