@@ -371,7 +371,6 @@ where
                     for cell in &mut advice_values[unusable_rows_start..] {
                         if witness.unblinded_advice.contains(&column_index) {
                             *cell = Blind::default().0;
-                            println!("Blinding factor: {:?}", cell);
                         } else {
                             *cell = Scheme::Scalar::random(&mut rng);
                         }
@@ -382,7 +381,6 @@ where
                 let blinds: Vec<_> = (0..meta.num_advice_columns)
                     .map(|i| {
                         if witness.unblinded_advice.contains(&i) {
-                            println!("UnBlinding factor");
                             Blind::default()
                         } else {
                             Blind(Scheme::Scalar::random(&mut rng))
