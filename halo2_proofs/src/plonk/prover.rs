@@ -157,6 +157,7 @@ where
         k: u32,
         current_phase: sealed::Phase,
         advice: Vec<Polynomial<Assigned<F>, LagrangeCoeff>>,
+        unblinded_advice: std::collections::HashSet<usize>,
         challenges: &'a HashMap<usize, F>,
         instances: &'a [&'a [F]],
         usable_rows: RangeTo<usize>,
@@ -329,6 +330,9 @@ where
                     k: params.k(),
                     current_phase,
                     advice: vec![domain.empty_lagrange_assigned(); meta.num_advice_columns],
+                    unblinded_advice: std::collections::HashSet::from_iter(
+                        meta.unblinded_advice_columns.clone().into_iter(),
+                    ),
                     instances,
                     challenges: &challenges,
                     // The prover will not be allowed to assign values to advice
@@ -363,16 +367,25 @@ where
                 );
 
                 // Add blinding factors to advice columns
-                for advice_values in &mut advice_values {
+                for (column_index, advice_values) in &mut advice_values.iter_mut().enumerate() {
                     for cell in &mut advice_values[unusable_rows_start..] {
-                        *cell = Scheme::Scalar::random(&mut rng);
+                        if witness.unblinded_advice.contains(&column_index) {
+                            *cell = Blind::default().0;
+                        } else {
+                            *cell = Scheme::Scalar::random(&mut rng);
+                        }
                     }
                 }
 
                 // Compute commitments to advice column polynomials
-                let blinds: Vec<_> = advice_values
-                    .iter()
-                    .map(|_| Blind(Scheme::Scalar::random(&mut rng)))
+                let blinds: Vec<_> = (0..meta.num_advice_columns)
+                    .map(|i| {
+                        if witness.unblinded_advice.contains(&i) {
+                            Blind::default()
+                        } else {
+                            Blind(Scheme::Scalar::random(&mut rng))
+                        }
+                    })
                     .collect();
                 let advice_commitments_projective: Vec<_> = advice_values
                     .iter()

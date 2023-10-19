@@ -2327,7 +2327,7 @@ mod tests {
                         (
                             (
                                 Any::Advice(Advice {
-                                    phase: FirstPhase.to_sealed()
+                                    phase: FirstPhase.to_sealed(),
                                 }),
                                 0
                             )
@@ -2355,7 +2355,7 @@ mod tests {
                         (
                             (
                                 Any::Advice(Advice {
-                                    phase: FirstPhase.to_sealed()
+                                    phase: FirstPhase.to_sealed(),
                                 }),
                                 2
                             )
