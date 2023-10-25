@@ -1816,17 +1816,16 @@ impl<F: Field> ConstraintSystem<F> {
         log::debug!("max single lookup degree: {}", max_single_lookup_degree);
 
         let required_degree = std::cmp::max(max_gate_degree, max_single_lookup_degree);
-        if self.allow_identity_chunks {
+        let minimum_degree = if self.allow_identity_chunks {
             let required_degree = (required_degree as u64 - 1).next_power_of_two() as usize;
             log::debug!("required degree: {}", required_degree);
             self.set_minimum_degree(required_degree + 1);
+            // safe to unwrap here
+            self.minimum_degree.unwrap()
         } else {
-            self.set_minimum_degree(required_degree);
+            required_degree.clone()
             // TODO: Find the best degree that needs least commitment in this case
-        }
-
-        // safe to unwrap here
-        let minimum_degree = self.minimum_degree.unwrap();
+        };
 
         log::trace!("minimum degree: {}", minimum_degree);
 
