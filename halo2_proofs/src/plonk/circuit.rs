@@ -1562,6 +1562,8 @@ pub struct ConstraintSystem<F: Field> {
     pub(crate) num_selectors: usize,
     pub(crate) num_challenges: usize,
 
+    /// whether or not to allow identity chunks in lookup
+    pub(crate) allow_identity_chunks: bool,
     /// Contains the index of each advice column that is unblinded.
     pub(crate) unblinded_advice_columns: Vec<usize>,
     /// Contains the phase for each advice column. Should have same length as num_advice_columns.
@@ -1615,6 +1617,7 @@ pub struct PinnedConstraintSystem<'a, F: Field> {
     num_instance_columns: &'a usize,
     num_selectors: &'a usize,
     num_challenges: &'a usize,
+    allow_identity_chunks: &'a bool,
     advice_column_phase: &'a Vec<sealed::Phase>,
     challenge_phase: &'a Vec<sealed::Phase>,
     gates: PinnedGates<'a, F>,
@@ -1674,6 +1677,7 @@ impl<F: Field> Default for ConstraintSystem<F> {
             num_instance_columns: 0,
             num_selectors: 0,
             num_challenges: 0,
+            allow_identity_chunks: true,
             unblinded_advice_columns: Vec::new(),
             advice_column_phase: Vec::new(),
             challenge_phase: Vec::new(),
@@ -1705,6 +1709,7 @@ impl<F: Field> ConstraintSystem<F> {
             num_instance_columns: &self.num_instance_columns,
             num_selectors: &self.num_selectors,
             num_challenges: &self.num_challenges,
+            allow_identity_chunks: &self.allow_identity_chunks,
             advice_column_phase: &self.advice_column_phase,
             challenge_phase: &self.challenge_phase,
             gates: PinnedGates(&self.gates),
@@ -1717,6 +1722,11 @@ impl<F: Field> ConstraintSystem<F> {
             constants: &self.constants,
             minimum_degree: &self.minimum_degree,
         }
+    }
+
+    /// set identity chunks to be allowed or not
+    pub fn set_allow_identity_chunks(&mut self, allow_identity_chunks: bool) {
+        self.allow_identity_chunks = allow_identity_chunks;
     }
 
     /// Enables this fixed column to be used for global constant assignments.
@@ -1806,11 +1816,14 @@ impl<F: Field> ConstraintSystem<F> {
         log::debug!("max single lookup degree: {}", max_single_lookup_degree);
 
         let required_degree = std::cmp::max(max_gate_degree, max_single_lookup_degree);
-        let required_degree = (required_degree as u64 - 1).next_power_of_two() as usize;
-
-        log::debug!("required degree: {}", required_degree);
-
-        self.set_minimum_degree(required_degree + 1);
+        if self.allow_identity_chunks {
+            let required_degree = (required_degree as u64 - 1).next_power_of_two() as usize;
+            log::debug!("required degree: {}", required_degree);
+            self.set_minimum_degree(required_degree + 1);
+        } else {
+            self.set_minimum_degree(required_degree);
+            // TODO: Find the best degree that needs least commitment in this case
+        }
 
         // safe to unwrap here
         let minimum_degree = self.minimum_degree.unwrap();
