@@ -1803,7 +1803,7 @@ impl<F: Field> ConstraintSystem<F> {
             })
             .max()
             .unwrap();
-        log::debug!("max single lookup degree: {}", max_gate_degree);
+        log::debug!("max single lookup degree: {}", max_single_lookup_degree);
 
         let required_degree = std::cmp::max(max_gate_degree, max_single_lookup_degree);
         let required_degree = (required_degree as u64 - 1).next_power_of_two() as usize;
