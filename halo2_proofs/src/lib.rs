@@ -38,3 +38,6 @@ pub mod transcript;
 pub mod dev;
 mod helpers;
 pub use helpers::SerdeFormat;
+
+#[allow(unsafe_code)]
+mod icicle;
