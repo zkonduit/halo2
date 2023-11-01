@@ -7,9 +7,12 @@ use group::{
     ff::{BatchInvert, PrimeField},
     Curve, Group, GroupOpsOwned, ScalarMulOwned,
 };
-use super::icicle;
-use rustacuda::prelude::DeviceBuffer;
 pub use halo2curves::{CurveAffine, CurveExt};
+
+#[cfg(feature = "icicle_gpu")]
+use super::icicle;
+#[cfg(feature = "icicle_gpu")]
+use rustacuda::prelude::DeviceBuffer;
 
 /// This represents an element of a group with basic operations that can be
 /// performed. This allows an FFT implementation (for example) to operate
@@ -140,6 +143,7 @@ pub fn small_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::C
     acc
 }
 
+#[cfg(feature = "icicle_gpu")]
 /// Performs a multi-exponentiation operation on GPU using Icicle library
 pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], is_lagrange: bool) -> C::Curve {
     let scalars_ptr: DeviceBuffer<::icicle::curves::bn254::ScalarField_BN254> = icicle::copy_scalars_to_device::<C>(coeffs);

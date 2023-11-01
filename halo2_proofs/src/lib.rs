@@ -39,5 +39,6 @@ pub mod dev;
 mod helpers;
 pub use helpers::SerdeFormat;
 
+#[cfg(feature = "icicle_gpu")]
 #[allow(unsafe_code)]
 mod icicle;
