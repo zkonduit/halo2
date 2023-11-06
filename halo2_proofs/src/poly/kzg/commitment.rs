@@ -344,7 +344,7 @@ where
         assert!(bases.len() >= size);
 
         #[cfg(feature = "icicle_gpu")]
-        if env::var("ENABLE_ICICLE_GPU").is_ok() {
+        if env::var("ENABLE_ICICLE_GPU").is_ok() && !icicle::should_use_cpu_msm(size) {
             best_multiexp_gpu::<E::G1Affine>(&scalars, true)
         } else {
             best_multiexp_cpu(&scalars, &bases[0..size])
@@ -397,7 +397,7 @@ where
         assert!(bases.len() >= size);
 
         #[cfg(feature = "icicle_gpu")]
-        if env::var("ENABLE_ICICLE_GPU").is_ok() {
+        if env::var("ENABLE_ICICLE_GPU").is_ok() && !icicle::should_use_cpu_msm(size) {
             best_multiexp_gpu::<E::G1Affine>(&scalars, false)
         } else {
             best_multiexp_cpu(&scalars, &bases[0..size])

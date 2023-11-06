@@ -1,19 +1,22 @@
 use group::ff::PrimeField;
 use icicle::{curves::bn254::{Point_BN254, ScalarField_BN254}, test_bn254::commit_bn254};
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 
 pub use icicle::curves::bn254::PointAffineNoInfinity_BN254;
 use rustacuda::memory::CopyDestination;
 use rustacuda::prelude::*;
 
 pub use halo2curves::CurveAffine;
-use std::mem;
-use std::sync::Once;
+use std::{mem, env};
 
 static mut GPU_CONTEXT: Option<Context> = None;
 static mut GPU_G: Option<DeviceBuffer<PointAffineNoInfinity_BN254>> = None;
 static mut GPU_G_LAGRANGE: Option<DeviceBuffer<PointAffineNoInfinity_BN254>> = None;
 static GPU_INIT: Once = Once::new();
+
+pub fn should_use_cpu_msm(size: usize) -> bool {
+    size <= (1 << u8::from_str_radix(&env::var("ICICLE_SMALL_K").unwrap_or("8".to_string()), 10).unwrap())
+}
 
 pub fn init_gpu<C: CurveAffine>(g: &[C], g_lagrange: &[C]) {
     unsafe {
