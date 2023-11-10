@@ -117,19 +117,27 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
 
         let m_values: Vec<F> = {
             use std::sync::atomic::{AtomicU64, Ordering};
-            use std::sync::RwLock;
             let m_values: Vec<AtomicU64> = (0..params.n()).map(|_| AtomicU64::new(0)).collect();
 
             for compressed_input_expression in compressed_inputs_expressions.iter() {
-                compressed_input_expression
+                let res: Result<(), Error> = compressed_input_expression
                     .par_iter()
                     .take(params.n() as usize - blinding_factors - 1)
-                    .for_each(|fi| {
-                        let index = table_index_value_mapping
+                    .map(|fi| {
+                        let index = match table_index_value_mapping
                             .get(&fi.to_repr().as_ref().to_owned())
-                            .unwrap();
+                        {
+                            Some(value) => value,
+                            None => {
+                                log::error!("value is OOR of lookup");
+                                return Err(Error::Synthesis);
+                            }
+                        };
                         m_values[*index].fetch_add(1, Ordering::Relaxed);
-                    });
+                        Ok(())
+                    })
+                    .collect();
+                res?
             }
 
             m_values
