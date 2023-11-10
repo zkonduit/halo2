@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use super::commitment::ParamsKZG;
 use crate::{
-    arithmetic::{best_multiexp, parallelize},
+    arithmetic::{best_multiexp_cpu, parallelize},
     poly::commitment::MSM,
 };
 use group::{Curve, Group};
@@ -66,7 +66,7 @@ impl<E: Engine + Debug> MSM<E::G1Affine> for MSMKZG<E> {
         use group::prime::PrimeCurveAffine;
         let mut bases = vec![E::G1Affine::identity(); self.scalars.len()];
         E::G1::batch_normalize(&self.bases, &mut bases);
-        best_multiexp(&self.scalars, &bases)
+        best_multiexp_cpu(&self.scalars, &bases)
     }
 
     fn bases(&self) -> Vec<E::G1> {
