@@ -1,0 +1,3 @@
+(function() {var implementors = {
+"halo2_proofs":[["impl&lt;F: <a class=\"trait\" href=\"halo2_proofs/arithmetic/trait.Field.html\" title=\"trait halo2_proofs::arithmetic::Field\">Field</a>&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/iter/traits/accum/trait.Product.html\" title=\"trait core::iter::traits::accum::Product\">Product</a> for <a class=\"enum\" href=\"halo2_proofs/plonk/enum.Expression.html\" title=\"enum halo2_proofs::plonk::Expression\">Expression</a>&lt;F&gt;"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()
