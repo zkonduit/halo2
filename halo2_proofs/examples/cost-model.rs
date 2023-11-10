@@ -8,7 +8,7 @@ use std::{
 use ff::Field;
 use group::{Curve, Group};
 use gumdrop::Options;
-use halo2_proofs::arithmetic::best_multiexp;
+use halo2_proofs::arithmetic::best_multiexp_cpu;
 use halo2curves::pasta::pallas;
 
 struct Estimator {
@@ -41,7 +41,7 @@ impl Estimator {
 
     fn multiexp(&self, size: usize) -> Duration {
         let start = Instant::now();
-        best_multiexp(&self.multiexp_scalars[..size], &self.multiexp_bases[..size]);
+        best_multiexp_cpu(&self.multiexp_scalars[..size], &self.multiexp_bases[..size]);
         Instant::now().duration_since(start)
     }
 }
