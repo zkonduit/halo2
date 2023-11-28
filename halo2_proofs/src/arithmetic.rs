@@ -146,7 +146,8 @@ pub fn small_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::C
 #[cfg(feature = "icicle_gpu")]
 /// Performs a multi-exponentiation operation on GPU using Icicle library
 pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], is_lagrange: bool) -> C::Curve {
-    let scalars_ptr: DeviceBuffer<::icicle::curves::bn254::ScalarField_BN254> = icicle::copy_scalars_to_device::<C>(coeffs);
+    let scalars_ptr: DeviceBuffer<::icicle::curves::bn254::ScalarField_BN254> =
+        icicle::copy_scalars_to_device::<C>(coeffs);
 
     return icicle::multiexp_on_device::<C>(scalars_ptr, is_lagrange);
 }

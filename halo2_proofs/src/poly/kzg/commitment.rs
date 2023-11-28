@@ -17,7 +17,7 @@ use rand_core::{OsRng, RngCore};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
-use std::{io, env};
+use std::{env, io};
 
 use super::msm::MSMKZG;
 
@@ -149,7 +149,6 @@ where
         g2: E::G2Affine,
         s_g2: E::G2Affine,
     ) -> Self {
-
         // let g_lagrange = if let Some(g_l) = g_lagrange {
         //     g_l
         // } else {
