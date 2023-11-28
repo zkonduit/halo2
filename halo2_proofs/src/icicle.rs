@@ -1,5 +1,5 @@
 use group::ff::PrimeField;
-use icicle::{curves::bn254::{Point_BN254, ScalarField_BN254}, test_bn254::commit_bn254};
+use icicle::{curves::bn254::{Point_BN254, ScalarField_BN254}, test_bn254::{commit_bn254, commit_batch_bn254}};
 use std::sync::{Arc, Once};
 
 pub use icicle::curves::bn254::PointAffineNoInfinity_BN254;
@@ -8,13 +8,14 @@ use rustacuda::prelude::*;
 
 pub use halo2curves::CurveAffine;
 use std::{mem, env};
+use log::info;
 
 static mut GPU_CONTEXT: Option<Context> = None;
 static mut GPU_G: Option<DeviceBuffer<PointAffineNoInfinity_BN254>> = None;
 static mut GPU_G_LAGRANGE: Option<DeviceBuffer<PointAffineNoInfinity_BN254>> = None;
 static GPU_INIT: Once = Once::new();
 
-pub fn should_use_cpu_msm(size: usize) -> bool {
+pub fn is_small_circuit(size: usize) -> bool {
     size <= (1 << u8::from_str_radix(&env::var("ICICLE_SMALL_K").unwrap_or("8".to_string()), 10).unwrap())
 }
 
@@ -24,6 +25,7 @@ pub fn init_gpu<C: CurveAffine>(g: &[C], g_lagrange: &[C]) {
             GPU_CONTEXT = Some(rustacuda::quick_init().unwrap());
             GPU_G = Some(copy_points_to_device(g));
             GPU_G_LAGRANGE = Some(copy_points_to_device(g_lagrange));
+            info!("GPU initialized");
         });
     }
 }
@@ -117,3 +119,14 @@ pub fn multiexp_on_device<C: CurveAffine>(mut coeffs: DeviceBuffer<ScalarField_B
     c_from_icicle_point::<C>(h_commit_result)
 }
 
+pub fn batch_multiexp_on_device<C: CurveAffine>(mut coeffs: DeviceBuffer<ScalarField_BN254>, mut bases: DeviceBuffer<PointAffineNoInfinity_BN254>, batch_size: usize) -> Vec<C::Curve> {    
+    let d_commit_result = commit_batch_bn254(&mut bases, &mut coeffs, batch_size);
+    let mut h_commit_result: Vec<Point_BN254> = (0..batch_size)
+        .map(|_| Point_BN254::zero())
+        .collect();
+    d_commit_result
+        .copy_to(&mut h_commit_result[..])
+        .unwrap();
+
+    h_commit_result.iter().map(|commit_result| c_from_icicle_point::<C>(*commit_result)).collect()
+}

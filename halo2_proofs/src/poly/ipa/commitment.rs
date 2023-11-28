@@ -101,6 +101,31 @@ impl<'params, C: CurveAffine> Params<'params, C> for ParamsIPA<C> {
 
         best_multiexp_cpu::<C>(&tmp_scalars, &tmp_bases)
     }
+    
+    #[cfg(feature = "icicle_gpu")]
+    /// Falls back to single CPU MSM
+    fn commit_lagrange_batch(
+        &self,
+        polys: &Vec<Polynomial<C::Scalar, LagrangeCoeff>>,
+        rs: &Vec<Blind<C::Scalar>>,
+    ) -> Vec<C::Curve> {
+        polys
+            .iter()
+            .zip(rs.iter())
+            .map(|(poly, r)| {
+                let mut tmp_scalars = Vec::with_capacity(poly.len() + 1);
+                let mut tmp_bases = Vec::with_capacity(poly.len() + 1);
+        
+                tmp_scalars.extend(poly.iter());
+                tmp_scalars.push(r.0);
+        
+                tmp_bases.extend(self.g_lagrange.iter());
+                tmp_bases.push(self.w);
+        
+                best_multiexp_cpu::<C>(&tmp_scalars, &tmp_bases)
+            })
+            .collect::<Vec<C::Curve>>()        
+    }
 
     /// Writes params to a buffer.
     fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
@@ -220,6 +245,27 @@ impl<'params, C: CurveAffine> ParamsProver<'params, C> for ParamsIPA<C> {
         tmp_bases.push(self.w);
 
         best_multiexp_cpu::<C>(&tmp_scalars, &tmp_bases)
+    }
+
+    #[cfg(feature = "icicle_gpu")]
+    /// Falls back to single CPU MSM
+    fn commit_batch(&self, polys: &Vec<Polynomial<C::Scalar, Coeff>>, rs: &Vec<Blind<C::Scalar>>) -> Vec<C::Curve> {
+        polys
+            .iter()
+            .zip(rs.iter())
+            .map(|(poly, r)| {
+                let mut tmp_scalars = Vec::with_capacity(poly.len() + 1);
+                let mut tmp_bases = Vec::with_capacity(poly.len() + 1);
+
+                tmp_scalars.extend(poly.iter());
+                tmp_scalars.push(r.0);
+
+                tmp_bases.extend(self.g.iter());
+                tmp_bases.push(self.w);
+
+                best_multiexp_cpu::<C>(&tmp_scalars, &tmp_bases)
+            })
+            .collect::<Vec<C::Curve>>()
     }
 
     fn get_g(&self) -> &[C] {

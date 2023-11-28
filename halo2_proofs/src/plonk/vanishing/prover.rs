@@ -17,6 +17,9 @@ use crate::{
     transcript::{EncodedChallenge, TranscriptWrite},
 };
 
+#[cfg(feature = "icicle_gpu")]
+use crate::icicle;
+
 pub(in crate::plonk) struct Committed<C: CurveAffine> {
     random_poly: Polynomial<C::Scalar, Coeff>,
     random_blind: Blind<C::Scalar>,
@@ -126,11 +129,26 @@ impl<C: CurveAffine> Committed<C> {
             .collect();
 
         // Compute commitments to each h(X) piece
+        #[cfg(feature = "icicle_gpu")]
+        let mut h_commitments_projective: Vec<_>;
+        #[cfg(feature = "icicle_gpu")]
+        if std::env::var("ENABLE_ICICLE_GPU").is_ok() && icicle::is_small_circuit(params.n() as usize) {
+            h_commitments_projective = params.commit_batch(&h_pieces, &h_blinds);
+        } else {
+            h_commitments_projective = h_pieces
+                .iter()
+                .zip(h_blinds.iter())
+                .map(|(h_piece, blind)| params.commit(h_piece, *blind))
+                .collect();
+            }
+        
+        #[cfg(not(feature = "icicle_gpu"))]
         let h_commitments_projective: Vec<_> = h_pieces
             .iter()
             .zip(h_blinds.iter())
             .map(|(h_piece, blind)| params.commit(h_piece, *blind))
             .collect();
+
         let mut h_commitments = vec![C::identity(); h_commitments_projective.len()];
         C::Curve::batch_normalize(&h_commitments_projective, &mut h_commitments);
         let h_commitments = h_commitments;

@@ -18,6 +18,9 @@ use crate::{
     transcript::{EncodedChallenge, TranscriptWrite},
 };
 
+#[cfg(feature = "icicle_gpu")]
+use crate::icicle;
+
 pub(crate) struct CommittedSet<C: CurveAffine> {
     pub(crate) permutation_product_poly: Polynomial<C::Scalar, Coeff>,
     pub(crate) permutation_product_coset: Polynomial<C::Scalar, ExtendedLagrangeCoeff>,
@@ -80,6 +83,8 @@ impl Argument {
         let mut last_z = C::Scalar::ONE;
 
         let mut sets = vec![];
+        let mut z_set = vec![];
+        let mut blind_set = vec![];
 
         for (columns, permutations) in self
             .columns
@@ -165,28 +170,47 @@ impl Argument {
             }
             // Set new last_z
             last_z = z[params.n() as usize - (blinding_factors + 1)];
-
             let blind = Blind(C::Scalar::random(&mut rng));
-
-            let permutation_product_commitment_projective = params.commit_lagrange(&z, blind);
-            let permutation_product_blind = blind;
+            z_set.push(z.clone());
+            blind_set.push(blind);
             let z = domain.lagrange_to_coeff(z);
             let permutation_product_poly = z.clone();
-
             let permutation_product_coset = domain.coeff_to_extended(z.clone());
-
-            let permutation_product_commitment =
-                permutation_product_commitment_projective.to_affine();
-
-            // Hash the permutation product commitment
-            transcript.write_point(permutation_product_commitment)?;
-
+            let permutation_product_blind = blind;
+            
             sets.push(CommittedSet {
                 permutation_product_poly,
                 permutation_product_coset,
                 permutation_product_blind,
             });
         }
+
+        #[cfg(feature = "icicle_gpu")]
+        if std::env::var("ENABLE_ICICLE_GPU").is_ok() && icicle::is_small_circuit(z_set[0].len()) {
+            let permutation_product_commitment_projectives = params.commit_lagrange_batch(&z_set, &blind_set);
+            permutation_product_commitment_projectives.iter().for_each(|commitment_projective| {
+                let permutation_product_commitment = commitment_projective.to_affine();
+
+                    // Hash the permutation product commitment
+                    transcript.write_point(permutation_product_commitment).unwrap();
+            });
+
+            return Ok(Committed { sets });
+        }
+
+        //NOTE: Since commit_lagrange checks for icicle_gpu feature internally, we can delegate the decision to fall back
+        // to CPU to it instead of duplicating code here for when icicle_gpu is not enabled
+        z_set
+            .iter()
+            .zip(blind_set.iter())
+            .for_each(|(z, blind)| {
+                let permutation_product_commitment_projective = params.commit_lagrange(&z, *blind);
+                let permutation_product_commitment =
+                    permutation_product_commitment_projective.to_affine();
+
+                // Hash the permutation product commitment
+                transcript.write_point(permutation_product_commitment).unwrap();
+            });
 
         Ok(Committed { sets })
     }

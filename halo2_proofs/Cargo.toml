@@ -100,6 +100,7 @@ batch = ["rand_core/getrandom"]
 circuit-params = []
 counter = ["lazy_static"]
 icicle_gpu = ["icicle", "rustacuda"]
+profile=[]
 
 [lib]
 bench = false
