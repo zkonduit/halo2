@@ -1,7 +1,6 @@
 use crate::multicore;
-use crate::plonk::lookup::prover::Committed;
-use crate::plonk::permutation::Argument;
-use crate::plonk::{permutation, AdviceQuery, Any, FixedQuery, InstanceQuery, ProvingKey};
+
+use crate::plonk::{permutation, Any, ProvingKey};
 
 #[cfg(feature = "mv-lookup")]
 use crate::plonk::mv_lookup as lookup;
@@ -14,10 +13,13 @@ use crate::{
     arithmetic::{parallelize, CurveAffine},
     poly::{Coeff, ExtendedLagrangeCoeff, Polynomial, Rotation},
 };
-use ff::BatchInvert;
+
 use group::ff::{Field, PrimeField, WithSmallOrderMulGroup};
 
 use super::{shuffle, ConstraintSystem, Expression};
+
+#[cfg(feature = "mv-lookup")]
+use ff::BatchInvert;
 
 /// Return the index in the polynomial of size `isize` after rotation `rot`.
 fn get_rotation_idx(idx: usize, rot: i32, rot_scale: i32, isize: i32) -> usize {
@@ -458,7 +460,7 @@ impl<C: CurveAffine> Evaluator<C> {
 
                 // Permutation constraints
                 parallelize(&mut values, |values, start| {
-                    let mut beta_term = extended_omega.pow_vartime(&[start as u64, 0, 0, 0]);
+                    let mut beta_term = extended_omega.pow_vartime([start as u64, 0, 0, 0]);
                     for (i, value) in values.iter_mut().enumerate() {
                         let idx = start + i;
                         let r_next = get_rotation_idx(idx, 1, rot_scale, isize);

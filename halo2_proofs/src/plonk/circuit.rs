@@ -1785,7 +1785,7 @@ impl<F: Field> ConstraintSystem<F> {
     pub fn lookup(
         &mut self,
         // FIXME use name in debug messages
-        name: &'static str,
+        _name: &'static str,
         table_map: impl FnOnce(&mut VirtualCells<'_, F>) -> Vec<(Expression<F>, TableColumn)>,
     ) {
         let mut cells = VirtualCells::new(self);
@@ -1922,7 +1922,7 @@ impl<F: Field> ConstraintSystem<F> {
     pub fn lookup_any(
         &mut self,
         // FIXME use name in debug messages
-        name: &'static str,
+        _name: &'static str,
         table_map: impl FnOnce(&mut VirtualCells<'_, F>) -> Vec<(Expression<F>, Expression<F>)>,
     ) {
         let mut cells = VirtualCells::new(self);

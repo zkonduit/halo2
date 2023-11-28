@@ -841,7 +841,6 @@ impl<F: FromUniformBytes<64> + Ord> MockProver<F> {
                         (self.n as usize - (self.cs.blinding_factors() + 1))..(self.n as usize);
                     (gate_row_ids
                         .clone()
-                        .into_iter()
                         .chain(blinding_rows.into_iter()))
                     .flat_map(move |row| {
                         let row = row as i32 + n;
@@ -1213,7 +1212,6 @@ impl<F: FromUniformBytes<64> + Ord> MockProver<F> {
                     let mut input_rows: Vec<(Vec<Value<F>>, usize)> = self
                         .usable_rows
                         .clone()
-                        .into_iter()
                         .map(|input_row| {
                             let t = shuffle
                                 .input_expressions
@@ -1805,7 +1803,6 @@ impl<F: FromUniformBytes<64> + Ord> MockProver<F> {
                     let mut input_rows: Vec<(Vec<Value<F>>, usize)> = self
                         .usable_rows
                         .clone()
-                        .into_iter()
                         .map(|input_row| {
                             let t = shuffle
                                 .input_expressions

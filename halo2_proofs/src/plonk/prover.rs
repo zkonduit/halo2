@@ -12,7 +12,7 @@ use super::{
         Instance, Selector,
     },
     permutation, shuffle, vanishing, ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX,
-    ChallengeY, Error, Expression, ProvingKey,
+    ChallengeY, Error, ProvingKey,
 };
 
 #[cfg(not(feature = "mv-lookup"))]

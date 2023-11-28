@@ -17,7 +17,7 @@ use rand_core::{OsRng, RngCore};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
-use std::{env, io};
+use std::{io};
 
 use super::msm::MSMKZG;
 
