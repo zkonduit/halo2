@@ -2315,16 +2315,16 @@ impl<F: Field> ConstraintSystem<F> {
 
     /// Allocate a new advice column at `FirstPhase`
     pub fn advice_column(&mut self) -> Column<Advice> {
-        self.advice_column_in(FirstPhase, true)
+        self.advice_column_in(FirstPhase)
     }
 
     /// Allocate a new unblinded advice column at `FirstPhase`
     pub fn unblinded_advice_column(&mut self) -> Column<Advice> {
-        self.advice_column_in(FirstPhase, false)
+        self.unblinded_advice_column_in(FirstPhase)
     }
 
     /// Allocate a new advice column in given phase
-    pub fn advice_column_in<P: Phase>(&mut self, phase: P, blinded: bool) -> Column<Advice> {
+    pub fn unblinded_advice_column_in<P: Phase>(&mut self, phase: P) -> Column<Advice> {
         let phase = phase.to_sealed();
         if let Some(previous_phase) = phase.prev() {
             self.assert_phase_exists(
@@ -2338,9 +2338,29 @@ impl<F: Field> ConstraintSystem<F> {
             column_type: Advice { phase },
         };
         self.num_advice_columns += 1;
-        if !blinded {
-            self.unblinded_advice_columns.push(tmp.index);
+        self.unblinded_advice_columns.push(tmp.index);
+
+        self.num_advice_queries.push(0);
+        self.advice_column_phase.push(phase);
+        tmp
+    }
+
+    /// Allocate a new advice column in given phase
+    pub fn advice_column_in<P: Phase>(&mut self, phase: P) -> Column<Advice> {
+        let phase = phase.to_sealed();
+        if let Some(previous_phase) = phase.prev() {
+            self.assert_phase_exists(
+                previous_phase,
+                format!("Column<Advice> in later phase {:?}", phase).as_str(),
+            );
         }
+
+        let tmp = Column {
+            index: self.num_advice_columns,
+            column_type: Advice { phase },
+        };
+        self.num_advice_columns += 1;
+
         self.num_advice_queries.push(0);
         self.advice_column_phase.push(phase);
         tmp
