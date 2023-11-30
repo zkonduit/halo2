@@ -390,7 +390,7 @@ where
                     .iter()
                     .map(|i| {
                         if witness.unblinded_advice.contains(&i) {
-                            Blind(Scheme::Scalar::ZERO)
+                            Blind::default()
                         } else {
                             Blind(Scheme::Scalar::random(&mut rng))
                         }
