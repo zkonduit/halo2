@@ -46,6 +46,8 @@ where
 
     let degree = cs.degree();
 
+    log::debug!("Creating domain with degree {}", degree);
+
     let domain = EvaluationDomain::new(degree as u32, k);
 
     (domain, cs, config)
