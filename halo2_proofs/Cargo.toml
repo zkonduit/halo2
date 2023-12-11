@@ -63,7 +63,7 @@ lazy_static = { version = "1", optional = true }
 env_logger = "0.10.0"
 
 # GPU Icicle integration
-icicle = { git = "https://github.com/ingonyama-zk/icicle.git", branch = "rust/large-bucket-factor-msm", optional = true }
+icicle = { git = "https://github.com/ingonyama-zk/icicle.git", optional = true }
 rustacuda = { version = "0.1", optional = true }
 
 # Developer tooling dependencies

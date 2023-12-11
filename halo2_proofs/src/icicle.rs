@@ -16,7 +16,7 @@ static mut GPU_G_LAGRANGE: Option<DeviceBuffer<PointAffineNoInfinity_BN254>> = N
 static GPU_INIT: Once = Once::new();
 
 pub fn is_small_circuit(size: usize) -> bool {
-    size <= (1 << u8::from_str_radix(&env::var("ICICLE_SMALL_K").unwrap_or("8".to_string()), 10).unwrap())
+    size <= (1 << u8::from_str_radix(&env::var("ICICLE_SMALL_CIRCUIT").unwrap_or("8".to_string()), 10).unwrap())
 }
 
 pub fn init_gpu<C: CurveAffine>(g: &[C], g_lagrange: &[C]) {
