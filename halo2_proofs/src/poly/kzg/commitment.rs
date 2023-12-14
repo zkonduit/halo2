@@ -1,7 +1,7 @@
 use crate::arithmetic::{best_multiexp_cpu, g_to_lagrange, parallelize};
 
 #[cfg(feature = "icicle_gpu")]
-use crate::arithmetic::best_multiexp_gpu;
+use crate::arithmetic::{best_batch_multiexp_gpu, best_multiexp_gpu};
 #[cfg(feature = "icicle_gpu")]
 use crate::icicle;
 
@@ -17,7 +17,7 @@ use rand_core::{OsRng, RngCore};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
-use std::{io, env};
+use std::{env, io};
 
 use super::msm::MSMKZG;
 
@@ -149,7 +149,6 @@ where
         g2: E::G2Affine,
         s_g2: E::G2Affine,
     ) -> Self {
-
         // let g_lagrange = if let Some(g_l) = g_lagrange {
         //     g_l
         // } else {
@@ -344,7 +343,7 @@ where
         assert!(bases.len() >= size);
 
         #[cfg(feature = "icicle_gpu")]
-        if env::var("ENABLE_ICICLE_GPU").is_ok() && !icicle::should_use_cpu_msm(size) {
+        if env::var("ENABLE_ICICLE_GPU").is_ok() && !icicle::is_small_circuit(size) {
             best_multiexp_gpu::<E::G1Affine>(&scalars, true)
         } else {
             best_multiexp_cpu(&scalars, &bases[0..size])
@@ -352,6 +351,29 @@ where
 
         #[cfg(not(feature = "icicle_gpu"))]
         best_multiexp_cpu(&scalars, &bases[0..size])
+    }
+
+    #[cfg(feature = "icicle_gpu")]
+    fn commit_lagrange_batch(
+        &self,
+        polys: &Vec<Polynomial<E::Scalar, LagrangeCoeff>>,
+        _: &Vec<Blind<E::Scalar>>,
+    ) -> Vec<E::G1> {
+        use log::info;
+
+        let batch_size = polys.len();
+        let size = polys[0].len();
+        let mut scalars = Vec::with_capacity(size * batch_size);
+        for poly in polys {
+            scalars.extend(poly.iter());
+        }
+
+        info!(
+            "Running batch icicle with size {} and batch_size {}",
+            size, batch_size
+        );
+
+        best_batch_multiexp_gpu::<E::G1Affine>(&scalars, &self.g_lagrange, batch_size)
     }
 
     /// Writes params to a buffer.
@@ -397,7 +419,7 @@ where
         assert!(bases.len() >= size);
 
         #[cfg(feature = "icicle_gpu")]
-        if env::var("ENABLE_ICICLE_GPU").is_ok() && !icicle::should_use_cpu_msm(size) {
+        if env::var("ENABLE_ICICLE_GPU").is_ok() && !icicle::is_small_circuit(size) {
             best_multiexp_gpu::<E::G1Affine>(&scalars, false)
         } else {
             best_multiexp_cpu(&scalars, &bases[0..size])
@@ -405,6 +427,29 @@ where
 
         #[cfg(not(feature = "icicle_gpu"))]
         best_multiexp_cpu(&scalars, &bases[0..size])
+    }
+
+    #[cfg(feature = "icicle_gpu")]
+    fn commit_batch(
+        &self,
+        polys: &Vec<Polynomial<E::Scalar, Coeff>>,
+        rs: &Vec<Blind<E::Scalar>>,
+    ) -> Vec<E::G1> {
+        use log::info;
+
+        let batch_size = polys.len();
+        let size = polys[0].len();
+        let mut scalars = Vec::with_capacity(size * batch_size);
+        for poly in polys {
+            scalars.extend(poly.iter());
+        }
+
+        info!(
+            "Running batch icicle with size {} and batch_size {}",
+            size, batch_size
+        );
+
+        best_batch_multiexp_gpu::<E::G1Affine>(&scalars, &self.g, batch_size)
     }
 
     fn get_g(&self) -> &[E::G1Affine] {
