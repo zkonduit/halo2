@@ -30,10 +30,10 @@ use crate::{
 };
 use group::prime::PrimeCurveAffine;
 
-use std::time::Instant;
 #[cfg(feature = "icicle_gpu")]
 use crate::icicle;
 use log::{debug, info};
+use std::time::Instant;
 
 /// This creates a proof for the provided `circuit` when given the public
 /// parameters `params` and the proving key [`ProvingKey`] that was
@@ -394,34 +394,41 @@ where
                         }
                     })
                     .collect();
-                
 
                 let now = std::time::Instant::now();
                 #[cfg(feature = "icicle_gpu")]
                 let mut advice_commitments_projective: Vec<_>;
                 #[cfg(feature = "icicle_gpu")]
-                if std::env::var("ENABLE_ICICLE_GPU").is_ok() && icicle::is_small_circuit(advice_values[0].len()) {
-                    advice_commitments_projective = params.commit_lagrange_batch(
-                        &advice_values,
-                        &blinds
+                if std::env::var("ENABLE_ICICLE_GPU").is_ok()
+                    && icicle::is_small_circuit(advice_values[0].len())
+                {
+                    advice_commitments_projective =
+                        params.commit_lagrange_batch(&advice_values, &blinds);
+                    debug!(
+                        "GPU: advice_commitments_projective of length {} took: {}",
+                        advice_commitments_projective.len(),
+                        now.elapsed().as_millis()
                     );
-                    debug!("GPU: advice_commitments_projective of length {} took: {}", advice_commitments_projective.len(), now.elapsed().as_millis());
                 } else {
                     advice_commitments_projective = advice_values
                         .iter()
                         .zip(blinds.iter())
-                        .map(|(poly, blind)| params.commit_lagrange(poly, *blind) )
+                        .map(|(poly, blind)| params.commit_lagrange(poly, *blind))
                         .collect();
                 }
-                
+
                 #[cfg(not(feature = "icicle_gpu"))]
                 let advice_commitments_projective: Vec<_> = advice_values
                     .iter()
                     .zip(blinds.iter())
-                    .map(|(poly, blind)| params.commit_lagrange(poly, *blind) )
+                    .map(|(poly, blind)| params.commit_lagrange(poly, *blind))
                     .collect();
                 #[cfg(not(feature = "icicle_gpu"))]
-                debug!("CPU: advice_commitments_projective of length {} took: {}", advice_commitments_projective.len(), now.elapsed().as_millis());
+                debug!(
+                    "CPU: advice_commitments_projective of length {} took: {}",
+                    advice_commitments_projective.len(),
+                    now.elapsed().as_millis()
+                );
 
                 let mut advice_commitments =
                     vec![Scheme::Curve::identity(); advice_commitments_projective.len()];
@@ -460,7 +467,10 @@ where
         (advice, challenges)
     };
     #[cfg(feature = "profile")]
-    info!("Advice and Challenge generation: {} ms", start.elapsed().as_millis());
+    info!(
+        "Advice and Challenge generation: {} ms",
+        start.elapsed().as_millis()
+    );
 
     // Sample theta challenge for keeping lookup columns linearly independent
     #[cfg(feature = "profile")]
@@ -550,7 +560,10 @@ where
         })
         .collect::<Result<Vec<_>, _>>()?;
     #[cfg(feature = "profile")]
-    info!("lookups commit_grand_sum: {} ms", start.elapsed().as_millis());
+    info!(
+        "lookups commit_grand_sum: {} ms",
+        start.elapsed().as_millis()
+    );
 
     #[cfg(feature = "profile")]
     let start = std::time::Instant::now();
@@ -620,7 +633,10 @@ where
         )
         .collect();
     #[cfg(feature = "profile")]
-    info!("advice langrange_to_coeff: {} ms", start.elapsed().as_millis());
+    info!(
+        "advice langrange_to_coeff: {} ms",
+        start.elapsed().as_millis()
+    );
     // Evaluate the h(X) polynomial
     #[cfg(feature = "profile")]
     let start = std::time::Instant::now();
@@ -645,7 +661,7 @@ where
     );
     #[cfg(feature = "profile")]
     info!("h_poly: {} ms", start.elapsed().as_millis());
-    
+
     // Construct the vanishing argument's h(X) commitments
     #[cfg(feature = "profile")]
     let start = std::time::Instant::now();

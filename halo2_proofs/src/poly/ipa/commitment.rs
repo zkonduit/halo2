@@ -101,7 +101,7 @@ impl<'params, C: CurveAffine> Params<'params, C> for ParamsIPA<C> {
 
         best_multiexp_cpu::<C>(&tmp_scalars, &tmp_bases)
     }
-    
+
     #[cfg(feature = "icicle_gpu")]
     /// Falls back to single CPU MSM
     fn commit_lagrange_batch(
@@ -115,16 +115,16 @@ impl<'params, C: CurveAffine> Params<'params, C> for ParamsIPA<C> {
             .map(|(poly, r)| {
                 let mut tmp_scalars = Vec::with_capacity(poly.len() + 1);
                 let mut tmp_bases = Vec::with_capacity(poly.len() + 1);
-        
+
                 tmp_scalars.extend(poly.iter());
                 tmp_scalars.push(r.0);
-        
+
                 tmp_bases.extend(self.g_lagrange.iter());
                 tmp_bases.push(self.w);
-        
+
                 best_multiexp_cpu::<C>(&tmp_scalars, &tmp_bases)
             })
-            .collect::<Vec<C::Curve>>()        
+            .collect::<Vec<C::Curve>>()
     }
 
     /// Writes params to a buffer.
@@ -249,7 +249,11 @@ impl<'params, C: CurveAffine> ParamsProver<'params, C> for ParamsIPA<C> {
 
     #[cfg(feature = "icicle_gpu")]
     /// Falls back to single CPU MSM
-    fn commit_batch(&self, polys: &Vec<Polynomial<C::Scalar, Coeff>>, rs: &Vec<Blind<C::Scalar>>) -> Vec<C::Curve> {
+    fn commit_batch(
+        &self,
+        polys: &Vec<Polynomial<C::Scalar, Coeff>>,
+        rs: &Vec<Blind<C::Scalar>>,
+    ) -> Vec<C::Curve> {
         polys
             .iter()
             .zip(rs.iter())

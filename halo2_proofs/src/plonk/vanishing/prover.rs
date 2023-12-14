@@ -132,7 +132,9 @@ impl<C: CurveAffine> Committed<C> {
         #[cfg(feature = "icicle_gpu")]
         let mut h_commitments_projective: Vec<_>;
         #[cfg(feature = "icicle_gpu")]
-        if std::env::var("ENABLE_ICICLE_GPU").is_ok() && icicle::is_small_circuit(params.n() as usize) {
+        if std::env::var("ENABLE_ICICLE_GPU").is_ok()
+            && icicle::is_small_circuit(params.n() as usize)
+        {
             h_commitments_projective = params.commit_batch(&h_pieces, &h_blinds);
         } else {
             h_commitments_projective = h_pieces
@@ -140,8 +142,8 @@ impl<C: CurveAffine> Committed<C> {
                 .zip(h_blinds.iter())
                 .map(|(h_piece, blind)| params.commit(h_piece, *blind))
                 .collect();
-            }
-        
+        }
+
         #[cfg(not(feature = "icicle_gpu"))]
         let h_commitments_projective: Vec<_> = h_pieces
             .iter()

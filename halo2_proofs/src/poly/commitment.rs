@@ -65,7 +65,7 @@ pub trait Params<'params, C: CurveAffine>: Sized + Clone {
         poly: &Polynomial<C::ScalarExt, LagrangeCoeff>,
         r: Blind<C::ScalarExt>,
     ) -> C::CurveExt;
-    
+
     #[cfg(feature = "icicle_gpu")]
     /// This commits to a batch of polynomials using their evaluations over the $2^k$ size
     /// evaluation domain. The commitments will be blinded by the blinding factors
@@ -101,8 +101,11 @@ pub trait ParamsProver<'params, C: CurveAffine>: Params<'params, C> {
     /// This computes a commitment to a polynomial described by the provided
     /// slice of coefficients. The commitment may be blinded by the blinding
     /// factor `r`.
-    fn commit_batch(&self, polys: &Vec<Polynomial<C::ScalarExt, Coeff>>, rs: &Vec<Blind<C::ScalarExt>>)
-        -> Vec<C::CurveExt>;
+    fn commit_batch(
+        &self,
+        polys: &Vec<Polynomial<C::ScalarExt, Coeff>>,
+        rs: &Vec<Blind<C::ScalarExt>>,
+    ) -> Vec<C::CurveExt>;
 
     /// Getter for g generators
     fn get_g(&self) -> &[C];
