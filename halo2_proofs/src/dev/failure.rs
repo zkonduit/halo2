@@ -39,9 +39,9 @@ pub enum FailureLocation {
 impl fmt::Display for FailureLocation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InRegion { region, offset } => write!(f, "in {} at offset {}", region, offset),
+            Self::InRegion { region, offset } => write!(f, "in {region} at offset {offset}"),
             Self::OutsideRegion { row } => {
-                write!(f, "outside any region, on row {}", row)
+                write!(f, "outside any region, on row {row}")
             }
         }
     }
@@ -246,8 +246,7 @@ impl fmt::Display for VerifyFailure {
             } => {
                 write!(
                     f,
-                    "{} uses {} at offset {}, which requires cell in instance column {:?} at row {} to be assigned.",
-                    region, gate, gate_offset, column, row
+                    "{region} uses {gate} at offset {gate_offset}, which requires cell in instance column {column:?} at row {row} to be assigned.",
                 )
             }
             Self::ConstraintNotSatisfied {
@@ -255,7 +254,7 @@ impl fmt::Display for VerifyFailure {
                 location,
                 cell_values,
             } => {
-                writeln!(f, "{} is not satisfied {}", constraint, location)?;
+                writeln!(f, "{constraint} is not satisfied {location}")?;
                 for (dvc, value) in cell_values.iter().map(|(vc, string)| {
                     let ann_map = match location {
                         FailureLocation::InRegion { region, offset: _ } => {
@@ -266,15 +265,14 @@ impl fmt::Display for VerifyFailure {
 
                     (DebugVirtualCell::from((vc, ann_map.as_ref())), string)
                 }) {
-                    writeln!(f, "- {} = {}", dvc, value)?;
+                    writeln!(f, "- {dvc} = {value}")?;
                 }
                 Ok(())
             }
             Self::ConstraintPoisoned { constraint } => {
                 write!(
                     f,
-                    "{} is active on an unusable row - missing selector?",
-                    constraint
+                    "{constraint} is active on an unusable row - missing selector?"
                 )
             }
             Self::Lookup {
@@ -283,8 +281,7 @@ impl fmt::Display for VerifyFailure {
             } => {
                 write!(
                     f,
-                    "Lookup (index: {}) is not satisfied {}",
-                    lookup_index, location
+                    "Lookup {name}(index: {lookup_index}) is not satisfied {location}",
                 )
             }
             Self::Shuffle {
@@ -294,8 +291,7 @@ impl fmt::Display for VerifyFailure {
             } => {
                 write!(
                     f,
-                    "Shuffle {}(index: {}) is not satisfied {}",
-                    name, shuffle_index, location
+                    "Shuffle {name}(index: {shuffle_index}) is not satisfied {location}"
                 )
             }
             Self::Permutation { column, location } => {
@@ -347,9 +343,9 @@ impl Debug for VerifyFailure {
                         .collect(),
                 };
 
-                write!(f, "{:#?}", debug)
+                write!(f, "{debug:#?}")
             }
-            _ => write!(f, "{:#}", self),
+            _ => write!(f, "{self:#}"),
         }
     }
 }
@@ -391,7 +387,7 @@ fn render_cell_not_assigned<F: Field>(
                 if cell.column == column && gate_offset as i32 + cell.rotation.0 == offset as i32 {
                     "X".to_string()
                 } else {
-                    format!("x{}", i)
+                    format!("x{i}")
                 }
             });
     }
@@ -453,7 +449,7 @@ fn render_constraint_not_satisfied<F: Field>(
             .entry(cell.rotation)
             .or_default()
             .entry(cell.column)
-            .or_insert(format!("x{}", i));
+            .or_insert(format!("x{i}"));
     }
 
     eprintln!("error: constraint not satisfied");
@@ -478,7 +474,7 @@ fn render_constraint_not_satisfied<F: Field>(
     eprintln!();
     eprintln!("  Assigned cell values:");
     for (i, (_, value)) in cell_values.iter().enumerate() {
-        eprintln!("    x{} = {}", i, value);
+        eprintln!("    x{i} = {value}");
     }
 }
 
@@ -522,7 +518,7 @@ fn render_lookup<F: Field>(
     // expressions for the table side of lookups.
     let lookup_columns = lookup.table_expressions.iter().map(|expr| {
         expr.evaluate(
-            &|f| format! {"Const: {:#?}", f},
+            &|f| format! {"Const: {f:#?}"},
             &|s| format! {"S{}", s.0},
             &|query| {
                 format!(
@@ -558,10 +554,10 @@ fn render_lookup<F: Field>(
                 )
             },
             &|challenge| format! {"C{}", challenge.index()},
-            &|query| format! {"-{}", query},
-            &|a, b| format! {"{} + {}", a,b},
-            &|a, b| format! {"{} * {}", a,b},
-            &|a, b| format! {"{} * {:?}", a, b},
+            &|query| format! {"-{query}"},
+            &|a, b| format! {"{a} + {b}"},
+            &|a, b| format! {"{a} * {b}"},
+            &|a, b| format! {"{a} * {b:?}"},
         )
     });
 
@@ -623,8 +619,8 @@ fn render_lookup<F: Field>(
         });
 
     eprintln!();
-    eprintln!("  Lookup inputs:");
-    for (i, input) in iterator {
+    eprintln!("  Lookup '{name}' inputs:");
+    for (i, input) in lookup.input_expressions.iter().enumerate() {
         // Fetch the cell values (since we don't store them in VerifyFailure::Lookup).
         let cell_values = input.evaluate(
             &|_| BTreeMap::default(),
@@ -662,7 +658,7 @@ fn render_lookup<F: Field>(
                 .entry(cell.rotation)
                 .or_default()
                 .entry(cell.column)
-                .or_insert(format!("x{}", i));
+                .or_insert(format!("x{i}"));
         }
 
         if i != 0 {
@@ -677,7 +673,7 @@ fn render_lookup<F: Field>(
 
         emitter::render_cell_layout("    | ", location, &columns, &layout, |_, rotation| {
             if rotation == 0 {
-                eprint!(" <--{{ Lookup inputs queried here");
+                eprint!(" <--{{ Lookup '{name}' inputs queried here");
             }
         });
 
@@ -685,7 +681,7 @@ fn render_lookup<F: Field>(
         eprintln!("    |");
         eprintln!("    | Assigned cell values:");
         for (i, (_, value)) in cell_values.iter().enumerate() {
-            eprintln!("    |   x{} = {}", i, value);
+            eprintln!("    |   x{i} = {value}");
         }
     }
 }
@@ -711,7 +707,7 @@ fn render_shuffle<F: Field>(
 
     let shuffle_columns = shuffle.shuffle_expressions.iter().map(|expr| {
         expr.evaluate(
-            &|f| format! {"Const: {:#?}", f},
+            &|f| format! {"Const: {f:#?}"},
             &|s| format! {"S{}", s.0},
             &|query| {
                 format!(
@@ -747,10 +743,10 @@ fn render_shuffle<F: Field>(
                 )
             },
             &|challenge| format! {"C{}", challenge.index()},
-            &|query| format! {"-{}", query},
-            &|a, b| format! {"{} + {}", a,b},
-            &|a, b| format! {"{} * {}", a,b},
-            &|a, b| format! {"{} * {:?}", a, b},
+            &|query| format! {"-{query}"},
+            &|a, b| format! {"{a} + {b}"},
+            &|a, b| format! {"{a} * {b}"},
+            &|a, b| format! {"{a} * {b:?}"},
         )
     });
 
@@ -788,7 +784,7 @@ fn render_shuffle<F: Field>(
     eprintln!(")");
 
     eprintln!();
-    eprintln!("  Shuffle '{}' inputs:", name);
+    eprintln!("  Shuffle '{name}' inputs:");
     for (i, input) in shuffle.input_expressions.iter().enumerate() {
         // Fetch the cell values (since we don't store them in VerifyFailure::Shuffle).
         let cell_values = input.evaluate(
@@ -827,7 +823,7 @@ fn render_shuffle<F: Field>(
                 .entry(cell.rotation)
                 .or_default()
                 .entry(cell.column)
-                .or_insert(format!("x{}", i));
+                .or_insert(format!("x{i}"));
         }
 
         if i != 0 {
@@ -842,7 +838,7 @@ fn render_shuffle<F: Field>(
 
         emitter::render_cell_layout("    | ", location, &columns, &layout, |_, rotation| {
             if rotation == 0 {
-                eprint!(" <--{{ Shuffle '{}' inputs queried here", name);
+                eprint!(" <--{{ Shuffle '{name}' inputs queried here");
             }
         });
 
@@ -850,7 +846,7 @@ fn render_shuffle<F: Field>(
         eprintln!("    |");
         eprintln!("    | Assigned cell values:");
         for (i, (_, value)) in cell_values.iter().enumerate() {
-            eprintln!("    |   x{} = {}", i, value);
+            eprintln!("    |   x{i} = {value}");
         }
     }
 }
@@ -889,7 +885,7 @@ impl VerifyFailure {
                 shuffle_index,
                 location,
             } => render_shuffle(prover, name, *shuffle_index, location),
-            _ => eprintln!("{}", self),
+            _ => eprintln!("{self}"),
         }
     }
 }

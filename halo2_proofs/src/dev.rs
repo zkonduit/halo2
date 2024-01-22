@@ -20,7 +20,6 @@ use crate::{
     },
 };
 
-#[cfg(feature = "multicore")]
 use crate::multicore::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
     ParallelSliceMut,
@@ -35,6 +34,9 @@ pub use failure::{FailureLocation, VerifyFailure};
 
 pub mod cost;
 pub use cost::CircuitCost;
+
+#[cfg(feature = "cost-estimator")]
+pub mod cost_model;
 
 mod gates;
 pub use gates::CircuitGates;
@@ -316,9 +318,12 @@ pub struct MockProver<F: Field> {
     current_phase: sealed::Phase,
 }
 
+/// Instance Value
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum InstanceValue<F: Field> {
+pub enum InstanceValue<F: Field> {
+    /// Assigned instance value
     Assigned(F),
+    /// Padding
     Padding,
 }
 
@@ -734,6 +739,7 @@ impl<F: FromUniformBytes<64> + Ord> MockProver<F> {
 
     /// Returns `Ok(())` if this `MockProver` is satisfied, or a list of errors indicating
     /// the reasons that the circuit is not satisfied.
+    /// Constraints and lookup are checked at `usable_rows`, parallelly.
     pub fn verify(&self) -> Result<(), Vec<VerifyFailure>> {
         self.verify_at_rows(self.usable_rows.clone(), self.usable_rows.clone())
     }
@@ -839,10 +845,7 @@ impl<F: FromUniformBytes<64> + Ord> MockProver<F> {
                 .flat_map(|(gate_index, gate)| {
                     let blinding_rows =
                         (self.n as usize - (self.cs.blinding_factors() + 1))..(self.n as usize);
-                    (gate_row_ids
-                        .clone()
-                        .chain(blinding_rows.into_iter()))
-                    .flat_map(move |row| {
+                    (gate_row_ids.clone().chain(blinding_rows.into_iter())).flat_map(move |row| {
                         let row = row as i32 + n;
                         gate.polynomials().iter().enumerate().filter_map(
                             move |(poly_index, poly)| match poly.evaluate_lazy(
@@ -1339,8 +1342,7 @@ impl<F: FromUniformBytes<64> + Ord> MockProver<F> {
     /// Returns `Ok(())` if this `MockProver` is satisfied, or a list of errors indicating
     /// the reasons that the circuit is not satisfied.
     /// Constraints are only checked at `gate_row_ids`, and lookup inputs are only checked at `lookup_input_row_ids`, parallelly.
-    #[cfg(feature = "multicore")]
-    pub fn verify_at_rows_par<I: Clone + Iterator<Item = usize>>(
+    pub fn verify_at_rows<I: Clone + Iterator<Item = usize>>(
         &self,
         gate_row_ids: I,
         lookup_input_row_ids: I,
@@ -1353,12 +1355,12 @@ impl<F: FromUniformBytes<64> + Ord> MockProver<F> {
         // check all the row ids are valid
         gate_row_ids.par_iter().for_each(|row_id| {
             if !self.usable_rows.contains(row_id) {
-                panic!("invalid gate row id {}", row_id);
+                panic!("invalid gate row id {row_id}");
             }
         });
         lookup_input_row_ids.par_iter().for_each(|row_id| {
             if !self.usable_rows.contains(row_id) {
-                panic!("invalid gate row id {}", row_id);
+                panic!("invalid gate row id {row_id}");
             }
         });
 
@@ -1942,15 +1944,18 @@ impl<F: FromUniformBytes<64> + Ord> MockProver<F> {
     /// Any verification failures will be pretty-printed to stderr before the function
     /// panics.
     ///
-    /// Internally, this function uses a parallel aproach in order to verify the `MockProver` contents.
+    /// Constraints are only checked at `gate_row_ids`, and lookup inputs are only checked at `lookup_input_row_ids`, parallelly.
     ///
     /// Apart from the stderr output, this method is equivalent to:
     /// ```ignore
-    /// assert_eq!(prover.verify_par(), Ok(()));
+    /// assert_eq!(prover.verify_at_rows(), Ok(()));
     /// ```
-    #[cfg(feature = "multicore")]
-    pub fn assert_satisfied_par(&self) {
-        if let Err(errs) = self.verify_par() {
+    pub fn assert_satisfied_at_rows<I: Clone + Iterator<Item = usize>>(
+        &self,
+        gate_row_ids: I,
+        lookup_input_row_ids: I,
+    ) {
+        if let Err(errs) = self.verify_at_rows(gate_row_ids, lookup_input_row_ids) {
             for err in errs {
                 err.emit(self);
                 eprintln!();
@@ -1959,35 +1964,34 @@ impl<F: FromUniformBytes<64> + Ord> MockProver<F> {
         }
     }
 
-    /// Panics if the circuit being checked by this `MockProver` is not satisfied.
-    ///
-    /// Any verification failures will be pretty-printed to stderr before the function
-    /// panics.
-    ///
-    /// Constraints are only checked at `gate_row_ids`, and lookup inputs are only checked at `lookup_input_row_ids`, parallelly.
-    ///
-    /// Apart from the stderr output, this method is equivalent to:
-    /// ```ignore
-    /// assert_eq!(prover.verify_at_rows_par(), Ok(()));
-    /// ```
-    #[cfg(feature = "multicore")]
-    pub fn assert_satisfied_at_rows_par<I: Clone + Iterator<Item = usize>>(
-        &self,
-        gate_row_ids: I,
-        lookup_input_row_ids: I,
-    ) {
-        if let Err(errs) = self.verify_at_rows_par(gate_row_ids, lookup_input_row_ids) {
-            for err in errs {
-                err.emit(self);
-                eprintln!();
-            }
-            panic!("circuit was not satisfied");
-        }
+    /// Returns the constraint system
+    pub fn cs(&self) -> &ConstraintSystem<F> {
+        &self.cs
+    }
+
+    /// Returns the usable rows
+    pub fn usable_rows(&self) -> &Range<usize> {
+        &self.usable_rows
+    }
+
+    /// Returns the list of Advice Columns used within a MockProver instance and the associated values contained on each Cell.
+    pub fn advice(&self) -> &Vec<Vec<CellValue<F>>> {
+        &self.advice
     }
 
     /// Returns the list of Fixed Columns used within a MockProver instance and the associated values contained on each Cell.
     pub fn fixed(&self) -> &Vec<Vec<CellValue<F>>> {
         &self.fixed
+    }
+
+    /// Returns the list of Selector Columns used within a MockProver instance and the associated values contained on each Cell.
+    pub fn selectors(&self) -> &Vec<Vec<bool>> {
+        &self.selectors
+    }
+
+    /// Returns the list of Instance Columns used within a MockProver instance and the associated values contained on each Cell.
+    pub fn instance(&self) -> &Vec<Vec<InstanceValue<F>>> {
+        &self.instance
     }
 
     /// Returns the permutation argument (`Assembly`) used within a MockProver instance.

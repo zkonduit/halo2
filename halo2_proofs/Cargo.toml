@@ -1,6 +1,6 @@
 [package]
 name = "halo2_proofs"
-version = "0.2.0"
+version = "0.3.0"
 authors = [
     "Sean Bowe <sean@electriccoin.co>",
     "Ying Tong Lai <yingtong@electriccoin.co>",
@@ -52,7 +52,7 @@ log = { version = "0.4.17", default_features = false }
 backtrace = { version = "0.3", optional = true }
 ff = "0.13"
 group = "0.13"
-halo2curves = { version = "0.1.0" }
+halo2curves = { version = "0.6.0", default-features = false }
 rand_core = { version = "0.6", default-features = false }
 tracing = "0.1"
 blake2b_simd = "1" # MSRV 1.66.0
@@ -65,6 +65,9 @@ env_logger = "0.10.0"
 # GPU Icicle integration
 icicle = { git = "https://github.com/ingonyama-zk/icicle.git", branch = "rust/large-bucket-factor-msm", optional = true }
 rustacuda = { version = "0.1", optional = true }
+serde = { version = "1", optional = true, features = ["derive"] }
+serde_derive = { version = "1", optional = true}
+rayon = "1.8"
 
 # Developer tooling dependencies
 plotters = { version = "0.3.0", default-features = false, optional = true }
@@ -79,13 +82,13 @@ criterion = "0.3"
 gumdrop = "0.8"
 proptest = "1"
 rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }
+serde_json = "1"
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 
 [features]
-default = ["batch", "multicore"]
-multicore = ["maybe-rayon/threads"]
+default = ["batch", "bits"]
 dev-graph = ["plotters", "tabbycat"]
 test-dev-graph = [
     "dev-graph",
@@ -93,6 +96,7 @@ test-dev-graph = [
     "plotters/bitmap_encoder",
     "plotters/ttf",
 ]
+bits = ["halo2curves/bits"]
 gadget-traces = ["backtrace"]
 thread-safe-region = []
 sanity-checks = []
@@ -101,6 +105,8 @@ circuit-params = []
 counter = ["lazy_static"]
 icicle_gpu = ["icicle", "rustacuda"]
 mv-lookup = []
+cost-estimator = ["serde", "serde_derive"]
+derive_serde = ["halo2curves/derive_serde"]
 
 [lib]
 bench = false
@@ -108,3 +114,7 @@ bench = false
 [[example]]
 name = "circuit-layout"
 required-features = ["test-dev-graph"]
+
+[[example]]
+name = "proof-size"
+required-features = ["cost-estimator"]
