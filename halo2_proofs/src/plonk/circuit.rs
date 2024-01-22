@@ -1115,7 +1115,7 @@ impl<F: Field> Expression<F> {
 
     fn write_identifier<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
         match self {
-            Expression::Constant(scalar) => write!(writer, "{:?}", scalar),
+            Expression::Constant(scalar) => write!(writer, "{scalar:?}"),
             Expression::Selector(selector) => write!(writer, "selector[{}]", selector.0),
             Expression::Fixed(query) => {
                 write!(
@@ -1162,7 +1162,7 @@ impl<F: Field> Expression<F> {
             }
             Expression::Scaled(a, f) => {
                 a.write_identifier(writer)?;
-                write!(writer, "*{:?}", f)
+                write!(writer, "*{f:?}")
             }
         }
     }
@@ -1567,8 +1567,9 @@ pub struct ConstraintSystem<F: Field> {
     pub(crate) num_selectors: usize,
     pub(crate) num_challenges: usize,
 
-    /// Contains the index of each advice column that is unblinded.
+    /// Contains the index of each advice column that is left unblinded.
     pub(crate) unblinded_advice_columns: Vec<usize>,
+
     /// Contains the phase for each advice column. Should have same length as num_advice_columns.
     pub(crate) advice_column_phase: Vec<sealed::Phase>,
     /// Contains the phase for each challenge. Should have same length as num_challenges.
@@ -1658,6 +1659,11 @@ impl<'a, F: Field> std::fmt::Debug for PinnedConstraintSystem<'a, F> {
             .field("permutation", self.permutation)
             .field("lookups", self.lookups)
             .field("lookups_map", self.lookups_map)
+            
+        if !self.shuffles.is_empty() {
+            debug_struct.field("shuffles", self.shuffles);
+        }
+        debug_struct
             .field("constants", self.constants)
             .field("minimum_degree", self.minimum_degree);
         debug_struct.finish()
@@ -2182,7 +2188,45 @@ impl<F: Field> ConstraintSystem<F> {
             .into_iter()
             .map(|a| a.unwrap())
             .collect::<Vec<_>>();
+        self.replace_selectors_with_fixed(&selector_replacements);
 
+        (self, polys)
+    }
+
+    /// Does not combine selectors and directly replaces them everywhere with fixed columns.
+    pub fn directly_convert_selectors_to_fixed(
+        mut self,
+        selectors: Vec<Vec<bool>>,
+    ) -> (Self, Vec<Vec<F>>) {
+        // The number of provided selector assignments must be the number we
+        // counted for this constraint system.
+        assert_eq!(selectors.len(), self.num_selectors);
+
+        let (polys, selector_replacements): (Vec<_>, Vec<_>) = selectors
+            .into_iter()
+            .map(|selector| {
+                let poly = selector
+                    .iter()
+                    .map(|b| if *b { F::ONE } else { F::ZERO })
+                    .collect::<Vec<_>>();
+                let column = self.fixed_column();
+                let rotation = Rotation::cur();
+                let expr = Expression::Fixed(FixedQuery {
+                    index: Some(self.query_fixed_index(column, rotation)),
+                    column_index: column.index,
+                    rotation,
+                });
+                (poly, expr)
+            })
+            .unzip();
+
+        self.replace_selectors_with_fixed(&selector_replacements);
+        self.num_selectors = 0;
+
+        (self, polys)
+    }
+
+    fn replace_selectors_with_fixed(&mut self, selector_replacements: &[Expression<F>]) {
         fn replace_selectors<F: Field>(
             expr: &mut Expression<F>,
             selector_replacements: &[Expression<F>],
@@ -2213,7 +2257,7 @@ impl<F: Field> ConstraintSystem<F> {
 
         // Substitute selectors for the real fixed columns in all gates
         for expr in self.gates.iter_mut().flat_map(|gate| gate.polys.iter_mut()) {
-            replace_selectors(expr, &selector_replacements, false);
+            replace_selectors(expr, selector_replacements, false);
         }
 
         // Substitute non-simple selectors for the real fixed columns in all
@@ -2235,7 +2279,7 @@ impl<F: Field> ConstraintSystem<F> {
                     .chain(lookup.table_expressions.iter_mut())
             }
         }) {
-            replace_selectors(expr, &selector_replacements, true);
+            replace_selectors(expr, selector_replacements, true);
         }
 
         for expr in self.shuffles.iter_mut().flat_map(|shuffle| {
@@ -2244,10 +2288,8 @@ impl<F: Field> ConstraintSystem<F> {
                 .iter_mut()
                 .chain(shuffle.shuffle_expressions.iter_mut())
         }) {
-            replace_selectors(expr, &selector_replacements, true);
+            replace_selectors(expr, selector_replacements, true);
         }
-
-        (self, polys)
     }
 
     /// Allocate a new (simple) selector. Simple selectors cannot be added to
@@ -2313,23 +2355,24 @@ impl<F: Field> ConstraintSystem<F> {
         tmp
     }
 
-    /// Allocate a new advice column at `FirstPhase`
-    pub fn advice_column(&mut self) -> Column<Advice> {
-        self.advice_column_in(FirstPhase)
-    }
-
     /// Allocate a new unblinded advice column at `FirstPhase`
     pub fn unblinded_advice_column(&mut self) -> Column<Advice> {
         self.unblinded_advice_column_in(FirstPhase)
     }
 
-    /// Allocate a new advice column in given phase
+    /// Allocate a new advice column at `FirstPhase`
+    pub fn advice_column(&mut self) -> Column<Advice> {
+        self.advice_column_in(FirstPhase)
+    }
+
+    /// Allocate a new unblinded advice column in given phase. This allows for the generation of deterministic commitments to advice columns
+    /// which can be used to split large circuits into smaller ones, whose proofs can then be "joined" together by their common witness commitments.
     pub fn unblinded_advice_column_in<P: Phase>(&mut self, phase: P) -> Column<Advice> {
         let phase = phase.to_sealed();
         if let Some(previous_phase) = phase.prev() {
             self.assert_phase_exists(
                 previous_phase,
-                format!("Column<Advice> in later phase {:?}", phase).as_str(),
+                format!("Column<Advice> in later phase {phase:?}").as_str(),
             );
         }
 
@@ -2337,21 +2380,24 @@ impl<F: Field> ConstraintSystem<F> {
             index: self.num_advice_columns,
             column_type: Advice { phase },
         };
-        self.num_advice_columns += 1;
         self.unblinded_advice_columns.push(tmp.index);
-
+        self.num_advice_columns += 1;
         self.num_advice_queries.push(0);
         self.advice_column_phase.push(phase);
         tmp
     }
 
     /// Allocate a new advice column in given phase
+    ///
+    /// # Panics
+    ///
+    /// It panics if previous phase before the given one doesn't have advice column allocated.
     pub fn advice_column_in<P: Phase>(&mut self, phase: P) -> Column<Advice> {
         let phase = phase.to_sealed();
         if let Some(previous_phase) = phase.prev() {
             self.assert_phase_exists(
                 previous_phase,
-                format!("Column<Advice> in later phase {:?}", phase).as_str(),
+                format!("Column<Advice> in later phase {phase:?}").as_str(),
             );
         }
 
@@ -2377,11 +2423,15 @@ impl<F: Field> ConstraintSystem<F> {
     }
 
     /// Requests a challenge that is usable after the given phase.
+    ///
+    /// # Panics
+    ///
+    /// It panics if the given phase doesn't have advice column allocated.
     pub fn challenge_usable_after<P: Phase>(&mut self, phase: P) -> Challenge {
         let phase = phase.to_sealed();
         self.assert_phase_exists(
             phase,
-            format!("Challenge usable after phase {:?}", phase).as_str(),
+            format!("Challenge usable after phase {phase:?}").as_str(),
         );
 
         let tmp = Challenge {
@@ -2402,8 +2452,7 @@ impl<F: Field> ConstraintSystem<F> {
             .find(|advice_column_phase| **advice_column_phase == phase)
             .unwrap_or_else(|| {
                 panic!(
-                    "No Column<Advice> is used in phase {:?} while allocating a new {:?}",
-                    phase, resource
+                    "No Column<Advice> is used in phase {phase:?} while allocating a new {resource:?}"
                 )
             });
     }
