@@ -1,6 +1,5 @@
-pub use rayon::{
+pub use maybe_rayon::{
     current_num_threads,
-    iter::{IndexedParallelIterator, IntoParallelRefIterator},
     iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
     join, scope,
     slice::ParallelSliceMut,
@@ -25,7 +24,7 @@ impl<T, E, I> TryFoldAndReduce<T, E> for I
 where
     T: Send + Sync,
     E: Send + Sync,
-    I: rayon::iter::ParallelIterator<Item = Result<T, E>>,
+    I: maybe_rayon::iter::ParallelIterator<Item = Result<T, E>>,
 {
     fn try_fold_and_reduce(
         self,

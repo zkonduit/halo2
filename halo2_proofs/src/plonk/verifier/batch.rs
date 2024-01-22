@@ -1,13 +1,12 @@
 use ff::FromUniformBytes;
 use group::ff::Field;
 use halo2curves::CurveAffine;
+use maybe_rayon::iter::IndexedParallelIterator;
 use rand_core::OsRng;
 
 use super::{verify_proof, VerificationStrategy};
 use crate::{
-    multicore::{
-        IndexedParallelIterator, IntoParallelIterator, ParallelIterator, TryFoldAndReduce,
-    },
+    multicore::{IntoParallelIterator, ParallelIterator, TryFoldAndReduce},
     plonk::{Error, VerifyingKey},
     poly::{
         commitment::{Params, MSM},

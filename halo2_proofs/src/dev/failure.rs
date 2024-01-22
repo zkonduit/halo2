@@ -281,7 +281,7 @@ impl fmt::Display for VerifyFailure {
             } => {
                 write!(
                     f,
-                    "Lookup {name}(index: {lookup_index}) is not satisfied {location}",
+                    "Lookup (index: {lookup_index}) is not satisfied {location}",
                 )
             }
             Self::Shuffle {
@@ -619,8 +619,8 @@ fn render_lookup<F: Field>(
         });
 
     eprintln!();
-    eprintln!("  Lookup '{name}' inputs:");
-    for (i, input) in lookup.input_expressions.iter().enumerate() {
+    eprintln!("  Lookup inputs:");
+    for (i, input) in iterator {
         // Fetch the cell values (since we don't store them in VerifyFailure::Lookup).
         let cell_values = input.evaluate(
             &|_| BTreeMap::default(),
@@ -673,7 +673,7 @@ fn render_lookup<F: Field>(
 
         emitter::render_cell_layout("    | ", location, &columns, &layout, |_, rotation| {
             if rotation == 0 {
-                eprint!(" <--{{ Lookup '{name}' inputs queried here");
+                eprint!(" <--{{ Lookup inputs queried here");
             }
         });
 

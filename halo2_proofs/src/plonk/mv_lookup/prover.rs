@@ -1,6 +1,5 @@
 use super::super::{
-    circuit::Expression, ChallengeBeta, ChallengeTheta, ChallengeX, Error,
-    ProvingKey,
+    circuit::Expression, ChallengeBeta, ChallengeTheta, ChallengeX, Error, ProvingKey,
 };
 use super::Argument;
 use crate::plonk::evaluation::evaluate;
@@ -8,20 +7,18 @@ use crate::{
     arithmetic::{eval_polynomial, parallelize, CurveAffine},
     poly::{
         commitment::{Blind, Params},
-        Coeff, EvaluationDomain, LagrangeCoeff, Polynomial, ProverQuery,
-        Rotation,
+        Coeff, EvaluationDomain, LagrangeCoeff, Polynomial, ProverQuery, Rotation,
     },
     transcript::{EncodedChallenge, TranscriptWrite},
 };
 
-use ff::{BitViewSized, PrimeField, WithSmallOrderMulGroup};
+use ff::WithSmallOrderMulGroup;
 use group::{
     ff::{BatchInvert, Field},
     Curve,
 };
 
 use rand_core::RngCore;
-
 
 use std::{
     collections::BTreeMap,

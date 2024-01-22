@@ -1,9 +1,9 @@
 mod prover;
 mod verifier;
 
-use crate::multicore::{IntoParallelIterator, ParallelIterator};
 use crate::{poly::query::Query, transcript::ChallengeScalar};
 use ff::Field;
+use maybe_rayon::{iter::ParallelIterator, prelude::IntoParallelIterator};
 pub use prover::ProverSHPLONK;
 use std::collections::BTreeSet;
 pub use verifier::VerifierSHPLONK;
