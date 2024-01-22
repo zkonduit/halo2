@@ -11,9 +11,14 @@ use super::{
         Advice, Any, Assignment, Challenge, Circuit, Column, ConstraintSystem, Fixed, FloorPlanner,
         Instance, Selector,
     },
-    mv_lookup, permutation, shuffle, vanishing, ChallengeBeta, ChallengeGamma, ChallengeTheta,
-    ChallengeX, ChallengeY, Error, Expression, ProvingKey,
+    permutation, shuffle, vanishing, ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX,
+    ChallengeY, Error, ProvingKey,
 };
+
+#[cfg(not(feature = "mv-lookup"))]
+use super::lookup;
+#[cfg(feature = "mv-lookup")]
+use super::mv_lookup as lookup;
 
 use crate::{
     arithmetic::{eval_polynomial, CurveAffine},
@@ -367,18 +372,19 @@ where
                 );
 
                 // Add blinding factors to advice columns
-                for (column_index, advice_values) in &mut advice_values.iter_mut().enumerate() {
+                for (column_index, advice_values) in column_indices.iter().zip(&mut advice_values) {
                     for cell in &mut advice_values[unusable_rows_start..] {
-                        if witness.unblinded_advice.contains(&column_index) {
-                            *cell = Blind::default().0;
-                        } else {
+                        if !witness.unblinded_advice.contains(column_index) {
                             *cell = Scheme::Scalar::random(&mut rng);
+                        } else {
+                            *cell = Blind::default().0;
                         }
                     }
                 }
 
                 // Compute commitments to advice column polynomials
-                let blinds: Vec<_> = (0..meta.num_advice_columns)
+                let blinds: Vec<_> = column_indices
+                    .iter()
                     .map(|i| {
                         if witness.unblinded_advice.contains(&i) {
                             Blind::default()
@@ -432,7 +438,8 @@ where
     // Sample theta challenge for keeping lookup columns linearly independent
     let theta: ChallengeTheta<_> = transcript.squeeze_challenge_scalar();
 
-    let lookups: Vec<Vec<mv_lookup::prover::Prepared<Scheme::Curve>>> = instance
+    #[cfg(feature = "mv-lookup")]
+    let lookups: Vec<Vec<lookup::prover::Prepared<Scheme::Curve>>> = instance
         .iter()
         .zip(advice.iter())
         .map(|(instance, advice)| -> Result<Vec<_>, Error> {
@@ -443,6 +450,34 @@ where
                 .iter()
                 .map(|lookup| {
                     lookup.prepare(
+                        pk,
+                        params,
+                        domain,
+                        theta,
+                        &advice.advice_polys,
+                        &pk.fixed_values,
+                        &instance.instance_values,
+                        &challenges,
+                        &mut rng,
+                        transcript,
+                    )
+                })
+                .collect()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    #[cfg(not(feature = "mv-lookup"))]
+    let lookups: Vec<Vec<lookup::prover::Permuted<Scheme::Curve>>> = instance
+        .iter()
+        .zip(advice.iter())
+        .map(|(instance, advice)| -> Result<Vec<_>, Error> {
+            // Construct and commit to permuted values for each lookup
+            pk.vk
+                .cs
+                .lookups
+                .iter()
+                .map(|lookup| {
+                    lookup.commit_permuted(
                         pk,
                         params,
                         domain,
@@ -485,13 +520,26 @@ where
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let lookups: Vec<Vec<mv_lookup::prover::Committed<Scheme::Curve>>> = lookups
+    #[cfg(feature = "mv-lookup")]
+    let lookups: Vec<Vec<lookup::prover::Committed<Scheme::Curve>>> = lookups
         .into_iter()
         .map(|lookups| -> Result<Vec<_>, _> {
             // Construct and commit to products for each lookup
             lookups
                 .into_iter()
                 .map(|lookup| lookup.commit_grand_sum(pk, params, beta, &mut rng, transcript))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    #[cfg(not(feature = "mv-lookup"))]
+    let lookups: Vec<Vec<lookup::prover::Committed<Scheme::Curve>>> = lookups
+        .into_iter()
+        .map(|lookups| -> Result<Vec<_>, _> {
+            // Construct and commit to products for each lookup
+            lookups
+                .into_iter()
+                .map(|lookup| lookup.commit_product(pk, params, beta, gamma, &mut rng, transcript))
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -644,7 +692,7 @@ where
         .collect::<Result<Vec<_>, _>>()?;
 
     // Evaluate the lookups, if any, at omega^i x.
-    let lookups: Vec<Vec<mv_lookup::prover::Evaluated<Scheme::Curve>>> = lookups
+    let lookups: Vec<Vec<lookup::prover::Evaluated<Scheme::Curve>>> = lookups
         .into_iter()
         .map(|lookups| -> Result<Vec<_>, _> {
             lookups

@@ -1,18 +1,25 @@
 use crate::multicore;
-use crate::plonk::lookup::prover::Committed;
-use crate::plonk::permutation::Argument;
-use crate::plonk::{
-    mv_lookup, permutation, AdviceQuery, Any, FixedQuery, InstanceQuery, ProvingKey,
-};
+
+use crate::plonk::{permutation, Any, ProvingKey};
+
+#[cfg(feature = "mv-lookup")]
+use crate::plonk::mv_lookup as lookup;
+
+#[cfg(not(feature = "mv-lookup"))]
+use crate::plonk::lookup;
+
 use crate::poly::Basis;
 use crate::{
     arithmetic::{parallelize, CurveAffine},
     poly::{Coeff, ExtendedLagrangeCoeff, Polynomial, Rotation},
 };
-use ff::BatchInvert;
+
 use group::ff::{Field, PrimeField, WithSmallOrderMulGroup};
 
 use super::{shuffle, ConstraintSystem, Expression};
+
+#[cfg(feature = "mv-lookup")]
+use ff::BatchInvert;
 
 /// Return the index in the polynomial of size `isize` after rotation `rot`.
 fn get_rotation_idx(idx: usize, rot: i32, rot_scale: i32, isize: i32) -> usize {
@@ -173,7 +180,10 @@ pub struct Evaluator<C: CurveAffine> {
     ///  Custom gates evalution
     pub custom_gates: GraphEvaluator<C>,
     ///  Lookups evalution
+    #[cfg(feature = "mv-lookup")]
     pub lookups: Vec<(Vec<GraphEvaluator<C>>, GraphEvaluator<C>)>,
+    #[cfg(not(feature = "mv-lookup"))]
+    pub lookups: Vec<GraphEvaluator<C>>,
     ///  Shuffle evalution
     pub shuffles: Vec<GraphEvaluator<C>>,
 }
@@ -230,6 +240,7 @@ impl<C: CurveAffine> Evaluator<C> {
         ));
 
         // Lookups
+        #[cfg(feature = "mv-lookup")]
         for lookup in cs.lookups.iter() {
             let mut graph_table = GraphEvaluator::default();
             let mut graph_inputs: Vec<_> = (0..lookup.inputs_expressions.len())
@@ -275,6 +286,41 @@ impl<C: CurveAffine> Evaluator<C> {
                 b) t + beta
             */
             ev.lookups.push((graph_inputs.to_vec(), graph_table));
+        }
+
+        #[cfg(not(feature = "mv-lookup"))]
+        // Lookups
+        for lookup in cs.lookups.iter() {
+            let mut graph = GraphEvaluator::default();
+
+            let mut evaluate_lc = |expressions: &Vec<Expression<_>>| {
+                let parts = expressions
+                    .iter()
+                    .map(|expr| graph.add_expression(expr))
+                    .collect();
+                graph.add_calculation(Calculation::Horner(
+                    ValueSource::Constant(0),
+                    parts,
+                    ValueSource::Theta(),
+                ))
+            };
+
+            // Input coset
+            let compressed_input_coset = evaluate_lc(&lookup.input_expressions);
+            // table coset
+            let compressed_table_coset = evaluate_lc(&lookup.table_expressions);
+            // z(\omega X) (a'(X) + \beta) (s'(X) + \gamma)
+            let right_gamma = graph.add_calculation(Calculation::Add(
+                compressed_table_coset,
+                ValueSource::Gamma(),
+            ));
+            let lc = graph.add_calculation(Calculation::Add(
+                compressed_input_coset,
+                ValueSource::Beta(),
+            ));
+            graph.add_calculation(Calculation::Mul(lc, right_gamma));
+
+            ev.lookups.push(graph);
         }
 
         // Shuffles
@@ -325,7 +371,7 @@ impl<C: CurveAffine> Evaluator<C> {
         beta: C::ScalarExt,
         gamma: C::ScalarExt,
         theta: C::ScalarExt,
-        lookups: &[Vec<mv_lookup::prover::Committed<C>>],
+        lookups: &[Vec<lookup::prover::Committed<C>>],
         shuffles: &[Vec<shuffle::prover::Committed<C>>],
         permutations: &[permutation::prover::Committed<C>],
     ) -> Polynomial<C::ScalarExt, ExtendedLagrangeCoeff> {
@@ -414,7 +460,7 @@ impl<C: CurveAffine> Evaluator<C> {
 
                 // Permutation constraints
                 parallelize(&mut values, |values, start| {
-                    let mut beta_term = extended_omega.pow_vartime(&[start as u64, 0, 0, 0]);
+                    let mut beta_term = extended_omega.pow_vartime([start as u64, 0, 0, 0]);
                     for (i, value) in values.iter_mut().enumerate() {
                         let idx = start + i;
                         let r_next = get_rotation_idx(idx, 1, rot_scale, isize);
@@ -487,6 +533,7 @@ impl<C: CurveAffine> Evaluator<C> {
             // The outer vector has capacity self.lookups.len()
             // The middle vector has capacity domain.extended_len()
             // The inner vector has capacity
+            #[cfg(feature = "mv-lookup")]
             let inputs_inv_sum: Vec<Vec<Vec<_>>> = lookups
                 .iter()
                 .enumerate()
@@ -541,6 +588,7 @@ impl<C: CurveAffine> Evaluator<C> {
                 .collect();
 
             // Lookups
+            #[cfg(feature = "mv-lookup")]
             for (n, lookup) in lookups.iter().enumerate() {
                 // Polynomials required for this lookup.
                 // Calculated here so these only have to be kept in memory for the short time
@@ -642,6 +690,82 @@ impl<C: CurveAffine> Evaluator<C> {
 
                         // q(X) = LHS - RHS mod zH(X)
                         *value = *value * y + (lhs - rhs) * l_active_row[idx];
+                    }
+                });
+            }
+
+            #[cfg(not(feature = "mv-lookup"))]
+            // Lookups
+            for (n, lookup) in lookups.iter().enumerate() {
+                // Polynomials required for this lookup.
+                // Calculated here so these only have to be kept in memory for the short time
+                // they are actually needed.
+                let product_coset = pk.vk.domain.coeff_to_extended(lookup.product_poly.clone());
+                let permuted_input_coset = pk
+                    .vk
+                    .domain
+                    .coeff_to_extended(lookup.permuted_input_poly.clone());
+                let permuted_table_coset = pk
+                    .vk
+                    .domain
+                    .coeff_to_extended(lookup.permuted_table_poly.clone());
+
+                // Lookup constraints
+                parallelize(&mut values, |values, start| {
+                    let lookup_evaluator = &self.lookups[n];
+                    let mut eval_data = lookup_evaluator.instance();
+                    for (i, value) in values.iter_mut().enumerate() {
+                        let idx = start + i;
+
+                        let table_value = lookup_evaluator.evaluate(
+                            &mut eval_data,
+                            fixed,
+                            advice,
+                            instance,
+                            challenges,
+                            &beta,
+                            &gamma,
+                            &theta,
+                            &y,
+                            &C::ScalarExt::ZERO,
+                            idx,
+                            rot_scale,
+                            isize,
+                        );
+
+                        let r_next = get_rotation_idx(idx, 1, rot_scale, isize);
+                        let r_prev = get_rotation_idx(idx, -1, rot_scale, isize);
+
+                        let a_minus_s = permuted_input_coset[idx] - permuted_table_coset[idx];
+                        // l_0(X) * (1 - z(X)) = 0
+                        *value = *value * y + ((one - product_coset[idx]) * l0[idx]);
+                        // l_last(X) * (z(X)^2 - z(X)) = 0
+                        *value = *value * y
+                            + ((product_coset[idx] * product_coset[idx] - product_coset[idx])
+                                * l_last[idx]);
+                        // (1 - (l_last(X) + l_blind(X))) * (
+                        //   z(\omega X) (a'(X) + \beta) (s'(X) + \gamma)
+                        //   - z(X) (\theta^{m-1} a_0(X) + ... + a_{m-1}(X) + \beta)
+                        //          (\theta^{m-1} s_0(X) + ... + s_{m-1}(X) + \gamma)
+                        // ) = 0
+                        *value = *value * y
+                            + ((product_coset[r_next]
+                                * (permuted_input_coset[idx] + beta)
+                                * (permuted_table_coset[idx] + gamma)
+                                - product_coset[idx] * table_value)
+                                * l_active_row[idx]);
+                        // Check that the first values in the permuted input expression and permuted
+                        // fixed expression are the same.
+                        // l_0(X) * (a'(X) - s'(X)) = 0
+                        *value = *value * y + (a_minus_s * l0[idx]);
+                        // Check that each value in the permuted lookup input expression is either
+                        // equal to the value above it, or the value at the same index in the
+                        // permuted table expression.
+                        // (1 - (l_last + l_blind)) * (a′(X) − s′(X))⋅(a′(X) − a′(\omega^{-1} X)) = 0
+                        *value = *value * y
+                            + (a_minus_s
+                                * (permuted_input_coset[idx] - permuted_input_coset[r_prev])
+                                * l_active_row[idx]);
                     }
                 });
             }

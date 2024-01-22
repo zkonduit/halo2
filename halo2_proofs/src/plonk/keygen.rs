@@ -41,9 +41,12 @@ where
     #[cfg(not(feature = "circuit-params"))]
     let config = ConcreteCircuit::configure(&mut cs);
 
+    #[cfg(feature = "mv-lookup")]
     let cs = cs.chunk_lookups();
 
     let degree = cs.degree();
+
+    log::debug!("Creating domain with degree {}", degree);
 
     let domain = EvaluationDomain::new(degree as u32, k);
 
@@ -284,7 +287,7 @@ where
     let config = ConcreteCircuit::configure_with_params(&mut cs, circuit.params());
     #[cfg(not(feature = "circuit-params"))]
     let config = ConcreteCircuit::configure(&mut cs);
-
+    #[cfg(feature = "mv-lookup")]
     let cs = cs.chunk_lookups();
 
     if (params.n() as usize) < cs.minimum_rows() {

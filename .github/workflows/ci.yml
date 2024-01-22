@@ -17,9 +17,9 @@ jobs:
         os: [ubuntu-latest, windows-latest, macOS-latest]
         include:
           - feature_set: basic
-            features: batch,dev-graph,gadget-traces
+            features: batch,dev-graph,gadget-traces,multicore
           - feature_set: all
-            features: batch,dev-graph,gadget-traces,multicore,test-dev-graph,thread-safe-region,sanity-checks,circuit-params
+            features: batch,dev-graph,gadget-traces,multicore,test-dev-graph,thread-safe-region,sanity-checks,circuit-params,mv-lookup
 
     steps:
       - uses: actions/checkout@v3
@@ -53,6 +53,11 @@ jobs:
         with:
           command: build
           args: --no-default-features --features batch,dev-graph,gadget-traces --target ${{ matrix.target }}
+      - name: cargo build mv-lookup
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --no-default-features --features batch,dev-graph,gadget-traces,mv-lookup --target ${{ matrix.target }}
 
   bitrot:
     name: Bitrot check
@@ -68,7 +73,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --benches --examples --all-features
+          args: --benches --examples
 
   doc-links:
     name: Intra-doc links
