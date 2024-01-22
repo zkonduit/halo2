@@ -492,7 +492,6 @@ fn permute_expression_pair_par<'params, C: CurveAffine, P: Params<'params, C>, R
 
     // didn't want to bother with Sync rng or anything so just do this part sequentially
     let blinding: Vec<(C::Scalar, C::Scalar)> = (usable_rows..params.n() as usize)
-        .into_iter()
         .map(|_| (C::Scalar::random(&mut rng), C::Scalar::random(&mut rng)))
         .collect();
     let (permuted_input_expression, permuted_table_coeffs): (Vec<_>, Vec<_>) = input_unique_ranges
@@ -575,7 +574,7 @@ fn permute_expression_pair_seq<'params, C: CurveAffine, P: Params<'params, C>, R
     // Populate permuted table at unfilled rows with leftover table elements
     for (coeff, count) in leftover_table_map.iter() {
         for _ in 0..*count {
-            permuted_table_coeffs[repeated_input_rows.pop().unwrap() as usize] = *coeff;
+            permuted_table_coeffs[repeated_input_rows.pop().unwrap()] = *coeff;
         }
     }
     assert!(repeated_input_rows.is_empty());

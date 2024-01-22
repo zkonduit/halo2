@@ -1,5 +1,5 @@
 use super::super::{
-    circuit::Expression, ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX, Error,
+    circuit::Expression, ChallengeBeta, ChallengeTheta, ChallengeX, Error,
     ProvingKey,
 };
 use super::Argument;
@@ -8,21 +8,21 @@ use crate::{
     arithmetic::{eval_polynomial, parallelize, CurveAffine},
     poly::{
         commitment::{Blind, Params},
-        Coeff, EvaluationDomain, ExtendedLagrangeCoeff, LagrangeCoeff, Polynomial, ProverQuery,
+        Coeff, EvaluationDomain, LagrangeCoeff, Polynomial, ProverQuery,
         Rotation,
     },
     transcript::{EncodedChallenge, TranscriptWrite},
 };
-use blake2b_simd::Hash;
-use ff::{BitViewSized, PrimeField, PrimeFieldBits, WithSmallOrderMulGroup};
+
+use ff::{BitViewSized, PrimeField, WithSmallOrderMulGroup};
 use group::{
     ff::{BatchInvert, Field},
     Curve,
 };
-use maybe_rayon::current_num_threads;
+
 use rand_core::RngCore;
-use std::collections::{BTreeSet, HashSet};
-use std::{any::TypeId, convert::TryInto, num::ParseIntError, ops::Index};
+
+
 use std::{
     collections::BTreeMap,
     iter,
@@ -67,7 +67,7 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
         fixed_values: &'a [Polynomial<C::Scalar, LagrangeCoeff>],
         instance_values: &'a [Polynomial<C::Scalar, LagrangeCoeff>],
         challenges: &'a [C::Scalar],
-        mut rng: R, // in case we want to blind (do we actually need zk?)
+        _rng: R, // in case we want to blind (do we actually need zk?)
         transcript: &mut T,
     ) -> Result<Prepared<C>, Error>
     where
@@ -142,7 +142,7 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
 
             m_values
                 .par_iter()
-                .map(|mi| F::from(mi.load(Ordering::Relaxed) as u64))
+                .map(|mi| F::from(mi.load(Ordering::Relaxed)))
                 .collect()
         };
         let m_values = pk.vk.domain.lagrange_from_vec(m_values);

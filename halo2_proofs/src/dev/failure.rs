@@ -589,6 +589,13 @@ fn render_lookup<F: Field>(
 
     eprintln!("error: lookup input does not exist in table");
     eprint!("  (");
+
+    #[cfg(not(feature = "mv-lookup"))]
+    for i in 0..lookup.input_expressions.len() {
+        eprint!("{}L{}", if i == 0 { "" } else { ", " }, i);
+    }
+
+    #[cfg(feature = "mv-lookup")]
     for input_expressions in lookup.inputs_expressions.iter() {
         for i in 0..input_expressions.len() {
             eprint!("{}L{}", if i == 0 { "" } else { ", " }, i);
@@ -601,72 +608,84 @@ fn render_lookup<F: Field>(
     }
     eprintln!(")");
 
+    #[cfg(not(feature = "mv-lookup"))]
+    let iterator = lookup.input_expressions.iter().enumerate();
+
+    #[cfg(feature = "mv-lookup")]
+    let iterator = lookup
+        .inputs_expressions
+        .iter()
+        .flat_map(|input_expressions| {
+            input_expressions
+                .iter()
+                .enumerate()
+                .map(move |(i, input_expression)| (i, input_expression))
+        });
+
     eprintln!();
     eprintln!("  Lookup inputs:");
-    for input_expressions in lookup.inputs_expressions.iter() {
-        for (i, input) in input_expressions.iter().enumerate() {
-            // Fetch the cell values (since we don't store them in VerifyFailure::Lookup).
-            let cell_values = input.evaluate(
-                &|_| BTreeMap::default(),
-                &|_| panic!("virtual selectors are removed during optimization"),
-                &cell_value(&util::load(n, row, &cs.fixed_queries, &prover.fixed)),
-                &cell_value(&util::load(n, row, &cs.advice_queries, &prover.advice)),
-                &cell_value(&util::load_instance(
-                    n,
-                    row,
-                    &cs.instance_queries,
-                    &prover.instance,
-                )),
-                &|_| BTreeMap::default(),
-                &|a| a,
-                &|mut a, mut b| {
-                    a.append(&mut b);
-                    a
-                },
-                &|mut a, mut b| {
-                    a.append(&mut b);
-                    a
-                },
-                &|a, _| a,
-            );
+    for (i, input) in iterator {
+        // Fetch the cell values (since we don't store them in VerifyFailure::Lookup).
+        let cell_values = input.evaluate(
+            &|_| BTreeMap::default(),
+            &|_| panic!("virtual selectors are removed during optimization"),
+            &cell_value(&util::load(n, row, &cs.fixed_queries, &prover.fixed)),
+            &cell_value(&util::load(n, row, &cs.advice_queries, &prover.advice)),
+            &cell_value(&util::load_instance(
+                n,
+                row,
+                &cs.instance_queries,
+                &prover.instance,
+            )),
+            &|_| BTreeMap::default(),
+            &|a| a,
+            &|mut a, mut b| {
+                a.append(&mut b);
+                a
+            },
+            &|mut a, mut b| {
+                a.append(&mut b);
+                a
+            },
+            &|a, _| a,
+        );
 
-            // Collect the necessary rendering information:
-            // - The columns involved in this constraint.
-            // - How many cells are in each column.
-            // - The grid of cell values, indexed by rotation.
-            let mut columns = BTreeMap::<metadata::Column, usize>::default();
-            let mut layout = BTreeMap::<i32, BTreeMap<metadata::Column, _>>::default();
-            for (i, (cell, _)) in cell_values.iter().enumerate() {
-                *columns.entry(cell.column).or_default() += 1;
-                layout
-                    .entry(cell.rotation)
-                    .or_default()
-                    .entry(cell.column)
-                    .or_insert(format!("x{}", i));
+        // Collect the necessary rendering information:
+        // - The columns involved in this constraint.
+        // - How many cells are in each column.
+        // - The grid of cell values, indexed by rotation.
+        let mut columns = BTreeMap::<metadata::Column, usize>::default();
+        let mut layout = BTreeMap::<i32, BTreeMap<metadata::Column, _>>::default();
+        for (i, (cell, _)) in cell_values.iter().enumerate() {
+            *columns.entry(cell.column).or_default() += 1;
+            layout
+                .entry(cell.rotation)
+                .or_default()
+                .entry(cell.column)
+                .or_insert(format!("x{}", i));
+        }
+
+        if i != 0 {
+            eprintln!();
+        }
+        eprintln!(
+            "    L{} = {}",
+            i,
+            emitter::expression_to_string(input, &layout)
+        );
+        eprintln!("    ^");
+
+        emitter::render_cell_layout("    | ", location, &columns, &layout, |_, rotation| {
+            if rotation == 0 {
+                eprint!(" <--{{ Lookup inputs queried here");
             }
+        });
 
-            if i != 0 {
-                eprintln!();
-            }
-            eprintln!(
-                "    L{} = {}",
-                i,
-                emitter::expression_to_string(input, &layout)
-            );
-            eprintln!("    ^");
-
-            emitter::render_cell_layout("    | ", location, &columns, &layout, |_, rotation| {
-                if rotation == 0 {
-                    eprint!(" <--{{ Lookup inputs queried here");
-                }
-            });
-
-            // Print the map from local variables to assigned values.
-            eprintln!("    |");
-            eprintln!("    | Assigned cell values:");
-            for (i, (_, value)) in cell_values.iter().enumerate() {
-                eprintln!("    |   x{} = {}", i, value);
-            }
+        // Print the map from local variables to assigned values.
+        eprintln!("    |");
+        eprintln!("    | Assigned cell values:");
+        for (i, (_, value)) in cell_values.iter().enumerate() {
+            eprintln!("    |   x{} = {}", i, value);
         }
     }
 }

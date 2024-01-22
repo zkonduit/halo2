@@ -1,4 +1,4 @@
-use super::{mv_lookup, permutation, shuffle, Assigned, Error};
+use super::{permutation, shuffle, Assigned, Error};
 use crate::circuit::layouter::SyncDeps;
 use crate::dev::metadata;
 use crate::{
@@ -16,6 +16,11 @@ use std::{
     convert::TryFrom,
     ops::{Neg, Sub},
 };
+
+#[cfg(not(feature = "mv-lookup"))]
+use super::lookup;
+#[cfg(feature = "mv-lookup")]
+use super::mv_lookup as lookup;
 
 mod compress_selectors;
 
@@ -1591,7 +1596,7 @@ pub struct ConstraintSystem<F: Field> {
 
     // Vector of lookup arguments, where each corresponds to a sequence of
     // input expressions and a sequence of table expressions involved in the lookup.
-    pub(crate) lookups: Vec<mv_lookup::Argument<F>>,
+    pub(crate) lookups: Vec<lookup::Argument<F>>,
 
     // Vector of shuffle arguments, where each corresponds to a sequence of
     // input expressions and a sequence of shuffle expressions involved in the shuffle.
@@ -1622,6 +1627,7 @@ pub struct PinnedConstraintSystem<'a, F: Field> {
     instance_queries: &'a Vec<(Column<Instance>, Rotation)>,
     fixed_queries: &'a Vec<(Column<Fixed>, Rotation)>,
     permutation: &'a permutation::Argument,
+    lookups: &'a Vec<lookup::Argument<F>>,
     lookups_map: &'a BTreeMap<String, LookupTracker<F>>,
     shuffles: &'a Vec<shuffle::Argument<F>>,
     constants: &'a Vec<Column<Fixed>>,
@@ -1643,12 +1649,14 @@ impl<'a, F: Field> std::fmt::Debug for PinnedConstraintSystem<'a, F> {
                 .field("advice_column_phase", self.advice_column_phase)
                 .field("challenge_phase", self.challenge_phase);
         }
+
         debug_struct
             .field("gates", &self.gates)
             .field("advice_queries", self.advice_queries)
             .field("instance_queries", self.instance_queries)
             .field("fixed_queries", self.fixed_queries)
             .field("permutation", self.permutation)
+            .field("lookups", self.lookups)
             .field("lookups_map", self.lookups_map)
             .field("constants", self.constants)
             .field("minimum_degree", self.minimum_degree);
@@ -1712,6 +1720,7 @@ impl<F: Field> ConstraintSystem<F> {
             advice_queries: &self.advice_queries,
             instance_queries: &self.instance_queries,
             permutation: &self.permutation,
+            lookups: &self.lookups,
             lookups_map: &self.lookups_map,
             shuffles: &self.shuffles,
             constants: &self.constants,
@@ -1737,15 +1746,46 @@ impl<F: Field> ConstraintSystem<F> {
         self.query_any_index(column, Rotation::cur());
         self.permutation.add_column(column);
     }
+    /// Add a lookup argument for some input expressions and table columns.
+    ///
+    /// `table_map` returns a map between input expressions and the table columns
+    /// they need to match.
+    #[cfg(not(feature = "mv-lookup"))]
+    pub fn lookup<S: AsRef<str>>(
+        &mut self,
+        name: S,
+        table_map: impl FnOnce(&mut VirtualCells<'_, F>) -> Vec<(Expression<F>, TableColumn)>,
+    ) -> usize {
+        let mut cells = VirtualCells::new(self);
+        let table_map = table_map(&mut cells)
+            .into_iter()
+            .map(|(mut input, table)| {
+                if input.contains_simple_selector() {
+                    panic!("expression containing simple selector supplied to lookup argument");
+                }
+                let mut table = cells.query_fixed(table.inner(), Rotation::cur());
+                input.query_cells(&mut cells);
+                table.query_cells(&mut cells);
+                (input, table)
+            })
+            .collect();
+        let index = self.lookups.len();
+
+        self.lookups
+            .push(lookup::Argument::new(name.as_ref(), table_map));
+
+        index
+    }
 
     /// Add a lookup argument for some input expressions and table columns.
     ///
     /// `table_map` returns a map between input expressions and the table columns
     /// they need to match.
+    #[cfg(feature = "mv-lookup")]
     pub fn lookup(
         &mut self,
         // FIXME use name in debug messages
-        name: &'static str,
+        _name: &'static str,
         table_map: impl FnOnce(&mut VirtualCells<'_, F>) -> Vec<(Expression<F>, TableColumn)>,
     ) {
         let mut cells = VirtualCells::new(self);
@@ -1778,6 +1818,7 @@ impl<F: Field> ConstraintSystem<F> {
     }
 
     /// Chunk lookup arguments into pieces below a given degree bound
+    #[cfg(feature = "mv-lookup")]
     pub fn chunk_lookups(mut self) -> Self {
         if self.lookups_map.is_empty() {
             return self;
@@ -1790,7 +1831,7 @@ impl<F: Field> ConstraintSystem<F> {
             .values()
             .map(|v| {
                 let table_degree = v.table.iter().map(|expr| expr.degree()).max().unwrap();
-                let base_lookup_degree = super::mv_lookup::base_degree(table_degree);
+                let base_lookup_degree = lookup::base_degree(table_degree);
 
                 let max_inputs_degree: usize = v
                     .inputs
@@ -1799,7 +1840,7 @@ impl<F: Field> ConstraintSystem<F> {
                     .max()
                     .unwrap();
 
-                mv_lookup::degree_with_input(base_lookup_degree, max_inputs_degree)
+                lookup::degree_with_input(base_lookup_degree, max_inputs_degree)
             })
             .max()
             .unwrap();
@@ -1814,7 +1855,7 @@ impl<F: Field> ConstraintSystem<F> {
         let mut lookups: Vec<_> = vec![];
         for v in self.lookups_map.values() {
             let LookupTracker { table, inputs } = v;
-            let mut args = vec![super::mv_lookup::Argument::new(table, &[inputs[0].clone()])];
+            let mut args = vec![lookup::Argument::new(table, &[inputs[0].clone()])];
 
             for input in inputs.iter().skip(1) {
                 let cur_input_degree = input.iter().map(|expr| expr.degree()).max().unwrap();
@@ -1844,10 +1885,44 @@ impl<F: Field> ConstraintSystem<F> {
     ///
     /// `table_map` returns a map between input expressions and the table expressions
     /// they need to match.
+    #[cfg(not(feature = "mv-lookup"))]
+    pub fn lookup_any<S: AsRef<str>>(
+        &mut self,
+        name: S,
+        table_map: impl FnOnce(&mut VirtualCells<'_, F>) -> Vec<(Expression<F>, Expression<F>)>,
+    ) -> usize {
+        let mut cells = VirtualCells::new(self);
+        let table_map = table_map(&mut cells)
+            .into_iter()
+            .map(|(mut input, mut table)| {
+                if input.contains_simple_selector() {
+                    panic!("expression containing simple selector supplied to lookup argument");
+                }
+                if table.contains_simple_selector() {
+                    panic!("expression containing simple selector supplied to lookup argument");
+                }
+                input.query_cells(&mut cells);
+                table.query_cells(&mut cells);
+                (input, table)
+            })
+            .collect();
+        let index = self.lookups.len();
+
+        self.lookups
+            .push(lookup::Argument::new(name.as_ref(), table_map));
+
+        index
+    }
+
+    /// Add a lookup argument for some input expressions and table expressions.
+    ///
+    /// `table_map` returns a map between input expressions and the table expressions
+    /// they need to match.
+    #[cfg(feature = "mv-lookup")]
     pub fn lookup_any(
         &mut self,
         // FIXME use name in debug messages
-        name: &'static str,
+        _name: &'static str,
         table_map: impl FnOnce(&mut VirtualCells<'_, F>) -> Vec<(Expression<F>, Expression<F>)>,
     ) {
         let mut cells = VirtualCells::new(self);
@@ -2144,11 +2219,21 @@ impl<F: Field> ConstraintSystem<F> {
         // Substitute non-simple selectors for the real fixed columns in all
         // lookup expressions
         for expr in self.lookups.iter_mut().flat_map(|lookup| {
-            lookup
-                .inputs_expressions
-                .iter_mut()
-                .flatten()
-                .chain(lookup.table_expressions.iter_mut())
+            #[cfg(feature = "mv-lookup")]
+            {
+                lookup
+                    .inputs_expressions
+                    .iter_mut()
+                    .flatten()
+                    .chain(lookup.table_expressions.iter_mut())
+            }
+            #[cfg(not(feature = "mv-lookup"))]
+            {
+                lookup
+                    .input_expressions
+                    .iter_mut()
+                    .chain(lookup.table_expressions.iter_mut())
+            }
         }) {
             replace_selectors(expr, &selector_replacements, true);
         }
@@ -2230,16 +2315,16 @@ impl<F: Field> ConstraintSystem<F> {
 
     /// Allocate a new advice column at `FirstPhase`
     pub fn advice_column(&mut self) -> Column<Advice> {
-        self.advice_column_in(FirstPhase, true)
+        self.advice_column_in(FirstPhase)
     }
 
     /// Allocate a new unblinded advice column at `FirstPhase`
     pub fn unblinded_advice_column(&mut self) -> Column<Advice> {
-        self.advice_column_in(FirstPhase, false)
+        self.unblinded_advice_column_in(FirstPhase)
     }
 
     /// Allocate a new advice column in given phase
-    pub fn advice_column_in<P: Phase>(&mut self, phase: P, blinded: bool) -> Column<Advice> {
+    pub fn unblinded_advice_column_in<P: Phase>(&mut self, phase: P) -> Column<Advice> {
         let phase = phase.to_sealed();
         if let Some(previous_phase) = phase.prev() {
             self.assert_phase_exists(
@@ -2253,9 +2338,29 @@ impl<F: Field> ConstraintSystem<F> {
             column_type: Advice { phase },
         };
         self.num_advice_columns += 1;
-        if !blinded {
-            self.unblinded_advice_columns.push(tmp.index);
+        self.unblinded_advice_columns.push(tmp.index);
+
+        self.num_advice_queries.push(0);
+        self.advice_column_phase.push(phase);
+        tmp
+    }
+
+    /// Allocate a new advice column in given phase
+    pub fn advice_column_in<P: Phase>(&mut self, phase: P) -> Column<Advice> {
+        let phase = phase.to_sealed();
+        if let Some(previous_phase) = phase.prev() {
+            self.assert_phase_exists(
+                previous_phase,
+                format!("Column<Advice> in later phase {:?}", phase).as_str(),
+            );
         }
+
+        let tmp = Column {
+            index: self.num_advice_columns,
+            column_type: Advice { phase },
+        };
+        self.num_advice_columns += 1;
+
         self.num_advice_queries.push(0);
         self.advice_column_phase.push(phase);
         tmp
@@ -2475,7 +2580,7 @@ impl<F: Field> ConstraintSystem<F> {
     }
 
     /// Returns lookup arguments
-    pub fn lookups(&self) -> &Vec<mv_lookup::Argument<F>> {
+    pub fn lookups(&self) -> &Vec<lookup::Argument<F>> {
         &self.lookups
     }
 

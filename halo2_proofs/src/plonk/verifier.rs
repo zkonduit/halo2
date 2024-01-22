@@ -125,11 +125,21 @@ where
     let lookups_permuted = (0..num_proofs)
         .map(|_| -> Result<Vec<_>, _> {
             // Hash each lookup permuted commitment
-            vk.cs
+            #[cfg(feature = "mv-lookup")]
+            let res = vk
+                .cs
                 .lookups
                 .iter()
                 .map(|argument| argument.read_prepared_commitments(transcript))
-                .collect::<Result<Vec<_>, _>>()
+                .collect::<Result<Vec<_>, _>>();
+            #[cfg(not(feature = "mv-lookup"))]
+            let res = vk
+                .cs
+                .lookups
+                .iter()
+                .map(|argument| argument.read_permuted_commitments(transcript))
+                .collect::<Result<Vec<_>, _>>();
+            res
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -150,10 +160,17 @@ where
         .into_iter()
         .map(|lookups| {
             // Hash each lookup product commitment
-            lookups
+            #[cfg(feature = "mv-lookup")]
+            let res = lookups
                 .into_iter()
                 .map(|lookup| lookup.read_grand_sum_commitment(transcript))
-                .collect::<Result<Vec<_>, _>>()
+                .collect::<Result<Vec<_>, _>>();
+            #[cfg(not(feature = "mv-lookup"))]
+            let res = lookups
+                .into_iter()
+                .map(|lookup| lookup.read_product_commitment(transcript))
+                .collect::<Result<Vec<_>, _>>();
+            res
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -324,7 +341,8 @@ where
                         ))
                         .chain(lookups.iter().zip(vk.cs.lookups.iter()).flat_map(
                             move |(p, argument)| {
-                                p.expressions(
+                                #[cfg(feature = "mv-lookup")]
+                                let ex = p.expressions(
                                     l_0,
                                     l_last,
                                     l_blind,
@@ -335,7 +353,22 @@ where
                                     fixed_evals,
                                     instance_evals,
                                     challenges,
-                                )
+                                );
+                                #[cfg(not(feature = "mv-lookup"))]
+                                let ex = p.expressions(
+                                    l_0,
+                                    l_last,
+                                    l_blind,
+                                    argument,
+                                    theta,
+                                    beta,
+                                    gamma,
+                                    advice_evals,
+                                    fixed_evals,
+                                    instance_evals,
+                                    challenges,
+                                );
+                                ex
                             },
                         ))
                         .chain(shuffles.iter().zip(vk.cs.shuffles.iter()).flat_map(
