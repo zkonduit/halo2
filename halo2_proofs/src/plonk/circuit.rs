@@ -1658,8 +1658,8 @@ impl<'a, F: Field> std::fmt::Debug for PinnedConstraintSystem<'a, F> {
             .field("fixed_queries", self.fixed_queries)
             .field("permutation", self.permutation)
             .field("lookups", self.lookups)
-            .field("lookups_map", self.lookups_map)
-            
+            .field("lookups_map", self.lookups_map);
+
         if !self.shuffles.is_empty() {
             debug_struct.field("shuffles", self.shuffles);
         }

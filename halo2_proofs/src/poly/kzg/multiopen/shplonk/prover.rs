@@ -12,11 +12,12 @@ use crate::poly::query::{PolynomialPointer, ProverQuery};
 use crate::poly::{Coeff, Polynomial};
 use crate::transcript::{EncodedChallenge, TranscriptWrite};
 
-use crate::multicore::{IntoParallelIterator, ParallelIterator};
 use ff::Field;
 use group::Curve;
 use halo2curves::pairing::Engine;
 use halo2curves::CurveExt;
+use maybe_rayon::iter::ParallelIterator;
+use maybe_rayon::prelude::IntoParallelIterator;
 use rand_core::RngCore;
 use std::fmt::Debug;
 use std::io;

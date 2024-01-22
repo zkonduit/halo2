@@ -8,7 +8,6 @@ use halo2_proofs::poly::kzg::multiopen::VerifierGWC;
 use halo2_proofs::poly::{commitment::ParamsProver, Rotation};
 use halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255};
 use halo2curves::bn256::{Bn256, Fr, G1Affine};
-use halo2curves::pairing::Engine;
 use rand_core::OsRng;
 use std::io::Write;
 
@@ -186,7 +185,7 @@ fn main() {
 
     fn keygen(k: u32) -> (ParamsKZG<Bn256>, ProvingKey<G1Affine>) {
         let params: ParamsKZG<Bn256> = ParamsKZG::new(k);
-        let empty_circuit: MyCircuit<<Bn256 as Engine>::Scalar> = MyCircuit {
+        let empty_circuit: MyCircuit<Fr> = MyCircuit {
             _marker: PhantomData,
         };
         let vk = keygen_vk(&params, &empty_circuit).expect("keygen_vk should not fail");
@@ -197,7 +196,7 @@ fn main() {
     fn prover(_k: u32, params: &ParamsKZG<Bn256>, pk: &ProvingKey<G1Affine>) -> Vec<u8> {
         let rng = OsRng;
 
-        let circuit: MyCircuit<<Bn256 as Engine>::Scalar> = MyCircuit {
+        let circuit: MyCircuit<Fr> = MyCircuit {
             _marker: PhantomData,
         };
 

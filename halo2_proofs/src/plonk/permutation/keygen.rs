@@ -11,11 +11,7 @@ use crate::{
     },
 };
 
-#[cfg(feature = "thread-safe-region")]
-use crate::multicore::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-
-#[cfg(not(feature = "thread-safe-region"))]
-use crate::multicore::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use maybe_rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 #[cfg(feature = "thread-safe-region")]
 use std::collections::{BTreeSet, HashMap};
