@@ -966,6 +966,7 @@ impl<F: FromUniformBytes<64> + Ord> MockProver<F> {
         let mut cached_table = Vec::new();
         let mut cached_table_identifier = Vec::new();
         // Check that all lookups exist in their respective tables.
+        // Check that all lookups exist in their respective tables.
         #[cfg(feature = "mv-lookup")]
         let lookup_errors =
             self.cs
@@ -978,19 +979,28 @@ impl<F: FromUniformBytes<64> + Ord> MockProver<F> {
                             &|scalar| Value::Real(scalar),
                             &|_| panic!("virtual selectors are removed during optimization"),
                             &|query| {
-                                self.fixed[query.column_index]
-                                    [(row as i32 + n + query.rotation.0) as usize % n as usize]
+                                let query = self.cs.fixed_queries[query.index.unwrap()];
+                                let column_index = query.0.index();
+                                let rotation = query.1 .0;
+                                self.fixed[column_index]
+                                    [(row as i32 + n + rotation) as usize % n as usize]
                                     .into()
                             },
                             &|query| {
-                                self.advice[query.column_index]
-                                    [(row as i32 + n + query.rotation.0) as usize % n as usize]
+                                let query = self.cs.advice_queries[query.index.unwrap()];
+                                let column_index = query.0.index();
+                                let rotation = query.1 .0;
+                                self.advice[column_index]
+                                    [(row as i32 + n + rotation) as usize % n as usize]
                                     .into()
                             },
                             &|query| {
+                                let query = self.cs.instance_queries[query.index.unwrap()];
+                                let column_index = query.0.index();
+                                let rotation = query.1 .0;
                                 Value::Real(
-                                    self.instance[query.column_index]
-                                        [(row as i32 + n + query.rotation.0) as usize % n as usize]
+                                    self.instance[column_index]
+                                        [(row as i32 + n + rotation) as usize % n as usize]
                                         .value(),
                                 )
                             },
@@ -1033,7 +1043,6 @@ impl<F: FromUniformBytes<64> + Ord> MockProver<F> {
                         cached_table = self
                             .usable_rows
                             .clone()
-                            .into_par_iter()
                             .filter_map(|table_row| {
                                 let t = lookup
                                     .table_expressions
@@ -1048,7 +1057,7 @@ impl<F: FromUniformBytes<64> + Ord> MockProver<F> {
                                 }
                             })
                             .collect();
-                        cached_table.par_sort_unstable();
+                        cached_table.sort_unstable();
                     }
                     let table = &cached_table;
 
@@ -1057,28 +1066,33 @@ impl<F: FromUniformBytes<64> + Ord> MockProver<F> {
                         .iter()
                         .map(|input_expressions| {
                             let mut inputs: Vec<(Vec<_>, usize)> = lookup_input_row_ids
-                                .clone()
-                                .into_par_iter()
+                                .par_iter()
                                 .filter_map(|input_row| {
                                     let t = input_expressions
                                         .iter()
-                                        .map(move |c| load(c, input_row))
+                                        .map(move |c| load(c, *input_row))
                                         .collect();
 
                                     if t != fill_row {
                                         // Also keep track of the original input row, since we're going to sort.
-                                        Some((t, input_row))
+                                        Some((t, *input_row))
                                     } else {
                                         None
                                     }
                                 })
                                 .collect();
-                            inputs.par_sort_unstable();
+                            inputs.sort_unstable();
 
+                            let mut i = 0;
                             inputs
-                                .par_iter()
+                                .iter()
                                 .filter_map(move |(input, input_row)| {
-                                    if table.binary_search(input).is_err() {
+                                    while i < table.len() && &table[i] < input {
+                                        i += 1;
+                                    }
+                                    if i == table.len() || &table[i] > input {
+                                        assert!(table.binary_search(input).is_err());
+
                                         Some(VerifyFailure::Lookup {
                                             lookup_index,
                                             location: FailureLocation::find_expressions(
