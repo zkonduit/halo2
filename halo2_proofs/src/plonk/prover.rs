@@ -376,9 +376,8 @@ where
                             *cell = Scheme::Scalar::random(&mut rng);
                         }
                     } else {
-                        #[cfg(feature = "sanity-checks")]
-                        for cell in &advice_values[unusable_rows_start..] {
-                            assert_eq!(*cell, Scheme::Scalar::ZERO);
+                        for cell in &mut advice_values[unusable_rows_start..] {
+                            *cell = Blind::default().0;
                         }
                     }
                 }
