@@ -6,7 +6,7 @@ use halo2_proofs::{
         ConstraintSystem, Error, Instance,
     },
     poly::{
-        commitment::ParamsProver,
+        commitment::{Params, ParamsProver},
         ipa::{
             commitment::{IPACommitmentScheme, ParamsIPA},
             multiopen::ProverIPA,
@@ -221,7 +221,8 @@ fn bench_poseidon<S, const WIDTH: usize, const RATE: usize, const L: usize>(
                 pk.get_vk(),
                 strategy,
                 &[&[&[output]]],
-                &mut transcript
+                &mut transcript,
+                params.n(),
             )
             .is_ok());
         });

@@ -34,6 +34,7 @@ pub fn verify_proof<
     strategy: Strategy,
     instances: &[&[&[Scheme::Scalar]]],
     transcript: &mut T,
+    orig_n: u64,
 ) -> Result<Strategy::Output, Error>
 where
     Scheme::Scalar: WithSmallOrderMulGroup<3> + FromUniformBytes<64>,
@@ -52,11 +53,11 @@ where
                 instance
                     .iter()
                     .map(|instance| {
-                        if instance.len() > params.n() as usize - (vk.cs.blinding_factors() + 1) {
+                        if instance.len() > orig_n as usize - (vk.cs.blinding_factors() + 1) {
                             return Err(Error::InstanceTooLarge);
                         }
                         let mut poly = instance.to_vec();
-                        poly.resize(params.n() as usize, Scheme::Scalar::ZERO);
+                        poly.resize(orig_n as usize, Scheme::Scalar::ZERO);
                         let poly = vk.domain.lagrange_from_vec(poly);
 
                         Ok(params.commit_lagrange(&poly, Blind::default()).to_affine())
@@ -202,7 +203,7 @@ where
             })
             .collect::<Result<Vec<_>, _>>()?
     } else {
-        let xn = x.pow([params.n()]);
+        let xn = x.pow([orig_n]);
         let (min_rotation, max_rotation) =
             vk.cs
                 .instance_queries
@@ -281,7 +282,7 @@ where
     // commitments open to the correct values.
     let vanishing = {
         // x^n
-        let xn = x.pow([params.n()]);
+        let xn = x.pow([orig_n]);
 
         let blinding_factors = vk.cs.blinding_factors();
         let l_evals = vk

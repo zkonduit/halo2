@@ -116,7 +116,15 @@ where
 
                 let strategy = BatchStrategy::new(params);
                 let mut transcript = Blake2bRead::init(&item.proof[..]);
-                verify_proof(params, vk, strategy, &instances, &mut transcript).map_err(|e| {
+                verify_proof(
+                    params,
+                    vk,
+                    strategy,
+                    &instances,
+                    &mut transcript,
+                    params.n(),
+                )
+                .map_err(|e| {
                     tracing::debug!("Batch item {} failed verification: {}", i, e);
                     e
                 })
