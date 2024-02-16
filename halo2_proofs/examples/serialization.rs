@@ -11,6 +11,7 @@ use halo2_proofs::{
         ConstraintSystem, Error, Fixed, Instance, ProvingKey,
     },
     poly::{
+        commitment::Params,
         kzg::{
             commitment::{KZGCommitmentScheme, ParamsKZG},
             multiopen::{ProverGWC, VerifierGWC},
@@ -186,7 +187,8 @@ fn main() {
         pk.get_vk(),
         strategy,
         &[instances],
-        &mut transcript
+        &mut transcript,
+        params.n()
     )
     .is_ok());
 }

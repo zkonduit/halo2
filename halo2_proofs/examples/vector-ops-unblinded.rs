@@ -9,7 +9,7 @@ use halo2_proofs::{
     circuit::{AssignedCell, Chip, Layouter, Region, SimpleFloorPlanner, Value},
     plonk::*,
     poly::{
-        commitment::ParamsProver,
+        commitment::{Params, ParamsProver},
         ipa::{
             commitment::{IPACommitmentScheme, ParamsIPA},
             multiopen::{ProverIPA, VerifierIPA},
@@ -505,6 +505,7 @@ where
             strategy,
             &[&[&instances]],
             &mut transcript,
+            params.n(),
         )
         .map(|strategy| strategy.finalize())
         .unwrap_or_default()

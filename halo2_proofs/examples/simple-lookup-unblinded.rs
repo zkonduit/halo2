@@ -4,6 +4,7 @@ extern crate criterion;
 use ff::PrimeField;
 use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner, Value};
 use halo2_proofs::plonk::*;
+use halo2_proofs::poly::commitment::Params;
 use halo2_proofs::poly::kzg::multiopen::VerifierGWC;
 use halo2_proofs::poly::{commitment::ParamsProver, Rotation};
 use halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255};
@@ -238,7 +239,8 @@ fn main() {
             vk,
             strategy,
             &[&[instances.as_slice()]],
-            &mut transcript
+            &mut transcript,
+            params.n(),
         )
         .is_ok());
     }

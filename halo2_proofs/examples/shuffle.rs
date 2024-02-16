@@ -6,7 +6,7 @@ use halo2_proofs::{
     halo2curves::pasta::EqAffine,
     plonk::*,
     poly::{
-        commitment::ParamsProver,
+        commitment::{Params, ParamsProver},
         ipa::{
             commitment::{IPACommitmentScheme, ParamsIPA},
             multiopen::{ProverIPA, VerifierIPA},
@@ -306,6 +306,7 @@ fn test_prover<C: CurveAffine, const W: usize, const H: usize>(
             strategy,
             &[&[]],
             &mut transcript,
+            params.n(),
         )
         .map(|strategy| strategy.finalize())
         .unwrap_or_default()
