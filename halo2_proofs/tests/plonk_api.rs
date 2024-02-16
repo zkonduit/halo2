@@ -11,7 +11,7 @@ use halo2_proofs::plonk::{
     Advice, Assigned, Circuit, Column, ConstraintSystem, Error, Fixed, ProvingKey, TableColumn,
     VerifyingKey,
 };
-use halo2_proofs::poly::commitment::{CommitmentScheme, ParamsProver, Prover, Verifier};
+use halo2_proofs::poly::commitment::{CommitmentScheme, Params, ParamsProver, Prover, Verifier};
 use halo2_proofs::poly::Rotation;
 use halo2_proofs::poly::VerificationStrategy;
 use halo2_proofs::transcript::{
@@ -525,6 +525,7 @@ fn plonk_api() {
             strategy,
             &[&[&pubinputs[..]], &[&pubinputs[..]]],
             &mut transcript,
+            params_verifier.n(),
         )
         .unwrap();
 

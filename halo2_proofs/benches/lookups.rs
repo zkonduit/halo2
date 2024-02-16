@@ -4,6 +4,7 @@ extern crate criterion;
 use ff::PrimeField;
 use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner, Value};
 use halo2_proofs::plonk::*;
+use halo2_proofs::poly::commitment::Params;
 use halo2_proofs::poly::kzg::multiopen::VerifierGWC;
 use halo2_proofs::poly::{commitment::ParamsProver, Rotation};
 use halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255};
@@ -190,7 +191,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             Challenge255<G1Affine>,
             Blake2bRead<&[u8], G1Affine, Challenge255<G1Affine>>,
             SingleStrategy<'_, Bn256>,
-        >(params, vk, strategy, &[&[]], &mut transcript)
+        >(params, vk, strategy, &[&[]], &mut transcript, params.n())
         .is_ok());
     }
 
