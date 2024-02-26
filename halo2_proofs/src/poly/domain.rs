@@ -52,7 +52,15 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
         }
 
         // ensure extended_k <= S
-        assert!(extended_k <= F::S);
+        assert!(
+            extended_k <= F::S,
+            "extended_k ({}, k={}, j={}) with degree ({}) must be <= S ({}), the size of the field",
+            extended_k,
+            k,
+            j,
+            n * quotient_poly_degree,
+            F::S
+        );
 
         let mut extended_omega = F::ROOT_OF_UNITY;
 
