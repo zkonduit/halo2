@@ -114,7 +114,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                 |mut table| {
                     for row in 0u64..(1 << 8) {
                         table.assign_cell(
-                            || format!("row {}", row),
+                            || format!("row {row}"),
                             config.table,
                             row as usize,
                             || Value::known(F::from(row)),
@@ -131,7 +131,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                     for offset in 0u64..(1 << 10) {
                         config.selector.enable(&mut region, offset as usize)?;
                         region.assign_advice(
-                            || format!("offset {}", offset),
+                            || format!("offset {offset}"),
                             config.advice,
                             offset as usize,
                             || Value::known(F::from(offset % 256)),
@@ -140,7 +140,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                     for offset in 1u64..(1 << 10) {
                         config.selector.enable(&mut region, offset as usize)?;
                         region.assign_advice(
-                            || format!("offset {}", offset),
+                            || format!("offset {offset}"),
                             config.other_advice,
                             offset as usize - 1,
                             || Value::known(F::from(offset % 256)),
