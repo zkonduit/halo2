@@ -178,12 +178,12 @@ where
                     Ok(selector)
                 })
                 .collect::<io::Result<_>>()?;
-            let (cs, _) = cs.compress_selectors(selectors.clone());
+            let (cs, _) = cs.compress_selectors(selectors.clone(), false);
             (cs, selectors)
         } else {
             // we still need to replace selectors with fixed Expressions in `cs`
             let fake_selectors = vec![vec![]; cs.num_selectors];
-            let (cs, _) = cs.directly_convert_selectors_to_fixed(fake_selectors);
+            let (cs, _) = cs.directly_convert_selectors_to_fixed(fake_selectors, false);
             (cs, vec![])
         };
 

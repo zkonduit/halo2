@@ -2127,7 +2127,11 @@ impl<F: Field> ConstraintSystem<F> {
     /// find which fixed column corresponds with a given `Selector`.
     ///
     /// Do not call this twice. Yes, this should be a builder pattern instead.
-    pub fn compress_selectors(mut self, selectors: Vec<Vec<bool>>) -> (Self, Vec<Vec<F>>) {
+    pub fn compress_selectors(
+        mut self,
+        selectors: Vec<Vec<bool>>,
+        return_polys: bool,
+    ) -> (Self, Vec<Vec<F>>) {
         // The number of provided selector assignments must be the number we
         // counted for this constraint system.
         assert_eq!(selectors.len(), self.num_selectors);
@@ -2171,6 +2175,7 @@ impl<F: Field> ConstraintSystem<F> {
                     rotation: Rotation::cur(),
                 })
             },
+            return_polys,
         );
 
         let mut selector_map = vec![None; selector_assignment.len()];
@@ -2197,6 +2202,7 @@ impl<F: Field> ConstraintSystem<F> {
     pub fn directly_convert_selectors_to_fixed(
         mut self,
         selectors: Vec<Vec<bool>>,
+        return_polys: bool,
     ) -> (Self, Vec<Vec<F>>) {
         // The number of provided selector assignments must be the number we
         // counted for this constraint system.
@@ -2205,10 +2211,14 @@ impl<F: Field> ConstraintSystem<F> {
         let (polys, selector_replacements): (Vec<_>, Vec<_>) = selectors
             .into_iter()
             .map(|selector| {
-                let poly = selector
-                    .iter()
-                    .map(|b| if *b { F::ONE } else { F::ZERO })
-                    .collect::<Vec<_>>();
+                let poly = if return_polys {
+                    selector
+                        .iter()
+                        .map(|b| if *b { F::ONE } else { F::ZERO })
+                        .collect::<Vec<_>>()
+                } else {
+                    vec![]
+                };
                 let column = self.fixed_column();
                 let rotation = Rotation::cur();
                 let expr = Expression::Fixed(FixedQuery {
