@@ -265,11 +265,11 @@ where
 
     let mut fixed = batch_invert_assigned(assembly.fixed);
     let (cs, selector_polys) = if compress_selectors {
-        cs.compress_selectors(assembly.selectors.clone())
+        cs.compress_selectors(assembly.selectors.clone(), true)
     } else {
         // After this, the ConstraintSystem should not have any selectors: `verify` does not need them, and `keygen_pk` regenerates `cs` from scratch anyways.
         let selectors = std::mem::take(&mut assembly.selectors);
-        cs.directly_convert_selectors_to_fixed(selectors)
+        cs.directly_convert_selectors_to_fixed(selectors, true)
     };
     fixed.extend(
         selector_polys
@@ -338,9 +338,9 @@ where
 
     let mut fixed = batch_invert_assigned(assembly.fixed);
     let (cs, selector_polys) = if vk.compress_selectors {
-        cs.compress_selectors(assembly.selectors)
+        cs.compress_selectors(assembly.selectors, true)
     } else {
-        cs.directly_convert_selectors_to_fixed(assembly.selectors)
+        cs.directly_convert_selectors_to_fixed(assembly.selectors, true)
     };
     fixed.extend(
         selector_polys

@@ -52,6 +52,7 @@ pub fn process<F: Field, E>(
     mut selectors: Vec<SelectorDescription>,
     max_degree: usize,
     mut allocate_fixed_column: E,
+    return_polys: bool,
 ) -> (Vec<Vec<F>>, Vec<SelectorAssignment<F>>)
 where
     E: FnMut() -> Expression<F>,
@@ -76,11 +77,16 @@ where
             // gate constraint.
             let expression = allocate_fixed_column();
 
-            let combination_assignment = selector
-                .activations
-                .iter()
-                .map(|b| if *b { F::ONE } else { F::ZERO })
-                .collect::<Vec<_>>();
+            let combination_assignment = if return_polys {
+                selector
+                    .activations
+                    .iter()
+                    .map(|b| if *b { F::ONE } else { F::ZERO })
+                    .collect::<Vec<_>>()
+            } else {
+                vec![]
+            };
+
             let combination_index = combination_assignments.len();
             combination_assignments.push(combination_assignment);
             selector_assignments.push(SelectorAssignment {
@@ -220,7 +226,11 @@ where
                 expression,
             }
         }));
-        combination_assignments.push(combination_assignment);
+        if return_polys {
+            combination_assignments.push(combination_assignment);
+        } else {
+            combination_assignments.push(vec![]);
+        }
     }
 
     (combination_assignments, selector_assignments)
@@ -287,7 +297,7 @@ mod tests {
                     });
                     query += 1;
                     tmp
-                });
+                },  true);
 
             {
                 let mut selectors_seen = vec![];
