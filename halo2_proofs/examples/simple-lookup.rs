@@ -100,7 +100,7 @@ fn main() {
 
                 let diff = lhs - rhs;
 
-                let constraint = diff.clone() * (Expression::Constant(F::ZERO) - diff.clone());
+                let constraint = diff.clone() * (Expression::Constant(F::ZERO) - diff);
 
                 Constraints::with_selector(s_mul, vec![constraint])
             });
@@ -118,14 +118,14 @@ fn main() {
                 |mut table| {
                     for row in 0u64..2_u64.pow(K - 1) {
                         table.assign_cell(
-                            || format!("input row {}", row),
+                            || format!("input row {row}"),
                             config.table_input,
                             row as usize,
                             || Value::known(F::from(row)),
                         )?;
                         // table output (2x the input) -- yeehaw
                         table.assign_cell(
-                            || format!("output row {}", row),
+                            || format!("output row {row}"),
                             config.table_output,
                             row as usize,
                             || Value::known(F::from(2 * row)),
@@ -144,14 +144,14 @@ fn main() {
                         config.qlookup.enable(&mut region, offset as usize)?;
                         // input
                         region.assign_advice(
-                            || format!("offset {}", offset),
+                            || format!("offset {offset}"),
                             config.advice,
                             offset as usize,
                             || Value::known(F::from(offset)),
                         )?;
                         // 2x
                         let cell = region.assign_advice(
-                            || format!("offset {}", offset),
+                            || format!("offset {offset}"),
                             config.other_advice,
                             offset as usize,
                             || Value::known(F::from(2 * offset)),
@@ -247,7 +247,7 @@ fn main() {
 
     env_logger::init();
 
-    println!("k = {}", K);
+    println!("k = {K}");
     // time it
     println!("keygen");
     let start = std::time::Instant::now();

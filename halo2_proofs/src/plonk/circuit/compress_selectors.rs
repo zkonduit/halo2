@@ -183,7 +183,11 @@ where
         }
 
         // Now, compute the selector and combination assignments.
-        let mut combination_assignment = vec![F::ZERO; n];
+        let mut combination_assignment = if return_polys {
+            vec![F::ZERO; n]
+        } else {
+            vec![]
+        };
         let combination_len = combination.len();
         let combination_index = combination_assignments.len();
         let query = allocate_fixed_column();
@@ -207,6 +211,7 @@ where
             }
 
             // Update the combination assignment
+            // if return polys is false the iteration will not run as it is empty
             for (combination, selector) in combination_assignment
                 .iter_mut()
                 .zip(selector.activations.iter())
@@ -226,11 +231,8 @@ where
                 expression,
             }
         }));
-        if return_polys {
-            combination_assignments.push(combination_assignment);
-        } else {
-            combination_assignments.push(vec![]);
-        }
+        // if return polys is false this is empty
+        combination_assignments.push(combination_assignment);
     }
 
     (combination_assignments, selector_assignments)
