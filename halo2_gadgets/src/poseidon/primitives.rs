@@ -310,7 +310,7 @@ impl<F: PrimeField, const RATE: usize, const L: usize> Domain<F, RATE> for Const
     type Padding = iter::Take<iter::Repeat<F>>;
 
     fn name() -> String {
-        format!("ConstantLength<{}>", L)
+        format!("ConstantLength<{L}>")
     }
 
     fn initial_capacity_element() -> F {

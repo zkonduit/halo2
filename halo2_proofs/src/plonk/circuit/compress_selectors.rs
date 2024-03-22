@@ -52,6 +52,7 @@ pub fn process<F: Field, E>(
     mut selectors: Vec<SelectorDescription>,
     max_degree: usize,
     mut allocate_fixed_column: E,
+    return_polys: bool,
 ) -> (Vec<Vec<F>>, Vec<SelectorAssignment<F>>)
 where
     E: FnMut() -> Expression<F>,
@@ -76,11 +77,16 @@ where
             // gate constraint.
             let expression = allocate_fixed_column();
 
-            let combination_assignment = selector
-                .activations
-                .iter()
-                .map(|b| if *b { F::ONE } else { F::ZERO })
-                .collect::<Vec<_>>();
+            let combination_assignment = if return_polys {
+                selector
+                    .activations
+                    .iter()
+                    .map(|b| if *b { F::ONE } else { F::ZERO })
+                    .collect::<Vec<_>>()
+            } else {
+                vec![]
+            };
+
             let combination_index = combination_assignments.len();
             combination_assignments.push(combination_assignment);
             selector_assignments.push(SelectorAssignment {
@@ -177,7 +183,11 @@ where
         }
 
         // Now, compute the selector and combination assignments.
-        let mut combination_assignment = vec![F::ZERO; n];
+        let mut combination_assignment = if return_polys {
+            vec![F::ZERO; n]
+        } else {
+            vec![]
+        };
         let combination_len = combination.len();
         let combination_index = combination_assignments.len();
         let query = allocate_fixed_column();
@@ -201,6 +211,7 @@ where
             }
 
             // Update the combination assignment
+            // if return polys is false the iteration will not run as it is empty
             for (combination, selector) in combination_assignment
                 .iter_mut()
                 .zip(selector.activations.iter())
@@ -220,6 +231,7 @@ where
                 expression,
             }
         }));
+        // if return polys is false this is empty
         combination_assignments.push(combination_assignment);
     }
 
@@ -287,7 +299,7 @@ mod tests {
                     });
                     query += 1;
                     tmp
-                });
+                },  true);
 
             {
                 let mut selectors_seen = vec![];
