@@ -169,39 +169,22 @@ impl<F: SerdePrimeField, B> Polynomial<F, B> {
         let poly_len = u32::from_be_bytes(poly_len) as usize;
 
         let repr_len = F::default().to_repr().as_ref().len();
-        let total_len = poly_len * repr_len;
 
-        let mut new_vals = vec![0u8; total_len];
+        let mut new_vals = vec![0u8; poly_len * repr_len];
         reader.read_exact(&mut new_vals)?;
 
-        let default_parallelism_approx = match std::thread::available_parallelism() {
-            Ok(parallelism) => usize::from(parallelism),
-            _ => 1,
-        };
-
-        log::debug!(
-            "[parallel-poly-read] default_parallelism_approx = {}",
-            default_parallelism_approx
-        );
-
-        let num_of_reps_per_chunk = std::cmp::max(1, poly_len / default_parallelism_approx);
-        let chunk_size = num_of_reps_per_chunk * repr_len;
-
         // parallel read
-        Ok(Self {
-            values: new_vals
-                .par_chunks(chunk_size)
-                .map(|mut chunk| {
-                    let mut felts = Vec::with_capacity(num_of_reps_per_chunk);
-                    while !chunk.is_empty() {
-                        felts.push(F::read(&mut chunk, format).unwrap());
-                    }
-                    felts
-                })
-                .flatten()
-                .collect::<Vec<_>>(),
-            _marker: PhantomData,
-        })
+        new_vals
+            .par_chunks_mut(repr_len)
+            .map(|chunk| {
+                let mut chunk = io::Cursor::new(chunk);
+                F::read(&mut chunk, format)
+            })
+            .collect::<io::Result<Vec<_>>>()
+            .map(|values| Self {
+                values,
+                _marker: PhantomData,
+            })
     }
 
     /// Reads polynomial from buffer using `SerdePrimeField::read`.  
