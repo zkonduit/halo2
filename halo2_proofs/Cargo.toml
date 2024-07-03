@@ -106,6 +106,7 @@ icicle_gpu = ["icicle", "rustacuda"]
 mv-lookup = []
 cost-estimator = ["serde", "serde_derive"]
 derive_serde = ["halo2curves/derive_serde"]
+parallel-poly-read = []
 
 [lib]
 bench = false
