@@ -1,9 +1,9 @@
-use std::{collections::HashMap, iter};
-
 use ff::Field;
 use group::Curve;
 use rand_chacha::ChaCha20Rng;
 use rand_core::{RngCore, SeedableRng};
+use rustc_hash::FxHashMap as HashMap;
+use std::iter;
 
 use super::Argument;
 use crate::{

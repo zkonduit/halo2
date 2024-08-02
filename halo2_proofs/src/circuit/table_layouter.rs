@@ -1,9 +1,8 @@
 //! Implementations of common table layouters.
 
-use std::{
-    collections::HashMap,
-    fmt::{self, Debug},
-};
+use std::fmt::{self, Debug};
+
+use rustc_hash::FxHashMap as HashMap;
 
 use ff::Field;
 

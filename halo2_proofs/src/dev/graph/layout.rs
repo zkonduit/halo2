@@ -3,7 +3,7 @@ use plotters::{
     coord::Shift,
     prelude::{DrawingArea, DrawingAreaErrorKind, DrawingBackend},
 };
-use std::collections::HashSet;
+use rustc_hash::FxHashSet as HashSet;
 use std::ops::Range;
 
 use crate::{

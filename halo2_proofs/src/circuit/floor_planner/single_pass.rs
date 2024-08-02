@@ -1,5 +1,5 @@
+use rustc_hash::FxHashMap as HashMap;
 use std::cmp;
-use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
 

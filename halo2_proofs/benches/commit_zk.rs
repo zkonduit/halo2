@@ -8,7 +8,8 @@ use maybe_rayon::current_num_threads;
 use rand_chacha::rand_core::RngCore;
 use rand_chacha::ChaCha20Rng;
 use rand_core::SeedableRng;
-use std::{collections::HashMap, iter};
+use rustc_hash::FxHashMap as HashMap;
+use std::iter;
 
 fn rand_poly_serial(mut rng: ChaCha20Rng, domain: usize) -> Vec<Scalar> {
     // Sample a random polynomial of degree n - 1

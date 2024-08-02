@@ -9,13 +9,15 @@ use core::cmp::max;
 use core::ops::{Add, Mul};
 use ff::Field;
 use sealed::SealedPhase;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::iter::{Product, Sum};
 use std::{
     convert::TryFrom,
     ops::{Neg, Sub},
 };
+
+use rustc_hash::FxHashMap as HashMap;
 
 #[cfg(not(feature = "mv-lookup"))]
 use super::lookup;
@@ -1701,7 +1703,7 @@ impl<F: Field> Default for ConstraintSystem<F> {
             lookups_map: BTreeMap::default(),
             lookups: Vec::new(),
             shuffles: Vec::new(),
-            general_column_annotations: HashMap::new(),
+            general_column_annotations: HashMap::default(),
             constants: vec![],
             minimum_degree: None,
         }

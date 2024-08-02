@@ -1,7 +1,7 @@
 //! The cost estimator takes high-level parameters for a circuit design, and estimates the
 //! verification cost, as well as resulting proof size.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet as HashSet;
 use std::{iter, num::ParseIntError, str::FromStr};
 
 use crate::plonk::Circuit;

@@ -1,12 +1,13 @@
 //! Developer tools for investigating the cost of a circuit.
 
 use std::{
-    cmp,
-    collections::{HashMap, HashSet},
-    iter,
+    cmp, iter,
     marker::PhantomData,
     ops::{Add, Mul},
 };
+
+use rustc_hash::FxHashMap as HashMap;
+use rustc_hash::FxHashSet as HashSet;
 
 use ff::{Field, PrimeField};
 use group::prime::PrimeGroup;
@@ -288,7 +289,7 @@ impl<G: PrimeGroup, ConcreteCircuit: Circuit<G::Scalar>> CircuitCost<G, Concrete
         assert!((1 << k) >= cs.minimum_rows());
 
         // Figure out how many point sets we have due to queried cells.
-        let mut column_queries: HashMap<Column<Any>, HashSet<i32>> = HashMap::new();
+        let mut column_queries: HashMap<Column<Any>, HashSet<i32>> = HashMap::default();
         for (c, r) in iter::empty()
             .chain(
                 cs.advice_queries
@@ -306,7 +307,7 @@ impl<G: PrimeGroup, ConcreteCircuit: Circuit<G::Scalar>> CircuitCost<G, Concrete
         {
             column_queries.entry(c).or_default().insert(r.0);
         }
-        let mut point_sets: HashSet<Vec<i32>> = HashSet::new();
+        let mut point_sets: HashSet<Vec<i32>> = HashSet::default();
         for (_, r) in column_queries {
             // Sort the query sets so we merge duplicates.
             let mut query_set: Vec<_> = r.into_iter().collect();
