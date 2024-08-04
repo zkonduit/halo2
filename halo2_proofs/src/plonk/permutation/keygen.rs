@@ -14,7 +14,10 @@ use crate::{
 use maybe_rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 #[cfg(feature = "thread-safe-region")]
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
+
+#[cfg(feature = "thread-safe-region")]
+use rustc_hash::FxHashMap as HashMap;
 
 #[cfg(not(feature = "thread-safe-region"))]
 /// Struct that accumulates all the necessary data in order to construct the permutation argument.

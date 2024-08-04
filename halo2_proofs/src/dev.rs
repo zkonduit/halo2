@@ -1,7 +1,7 @@
 //! Tools for developing circuits.
 
-use std::collections::HashMap;
-use std::collections::HashSet;
+use rustc_hash::FxHashMap as HashMap;
+use rustc_hash::FxHashSet as HashSet;
 use std::iter;
 use std::ops::{Add, Mul, Neg, Range};
 
