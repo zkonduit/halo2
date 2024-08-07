@@ -2,7 +2,9 @@ use super::super::{
     circuit::Expression, ChallengeBeta, ChallengeTheta, ChallengeX, Error, ProvingKey,
 };
 use super::Argument;
+use crate::helpers::SerdeCurveAffine;
 use crate::plonk::evaluation::evaluate;
+use crate::SerdeFormat;
 use crate::{
     arithmetic::{eval_polynomial, parallelize, CurveAffine},
     poly::{
@@ -11,7 +13,6 @@ use crate::{
     },
     transcript::{EncodedChallenge, TranscriptWrite},
 };
-
 use ff::WithSmallOrderMulGroup;
 use group::{
     ff::{BatchInvert, Field},
@@ -39,6 +40,37 @@ pub(in crate::plonk) struct Prepared<C: CurveAffine> {
 pub(in crate::plonk) struct Committed<C: CurveAffine> {
     pub(in crate::plonk) m_poly: Polynomial<C::Scalar, Coeff>,
     pub(in crate::plonk) phi_poly: Polynomial<C::Scalar, Coeff>,
+    pub(in crate::plonk) commitment: C,
+}
+
+impl<C: SerdeCurveAffine> Committed<C> {
+    pub fn write<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+        format: SerdeFormat,
+    ) -> std::io::Result<()>
+    where
+        <C as CurveAffine>::ScalarExt: crate::helpers::SerdePrimeField,
+    {
+        self.m_poly.write(writer, format)?;
+        self.phi_poly.write(writer, format)?;
+        self.commitment.write(writer, format)
+    }
+
+    pub fn read<R: std::io::Read>(reader: &mut R, format: SerdeFormat) -> std::io::Result<Self>
+    where
+        <C as CurveAffine>::ScalarExt: crate::helpers::SerdePrimeField,
+    {
+        let m_poly = Polynomial::read(reader, format)?;
+        let phi_poly = Polynomial::read(reader, format)?;
+        let commitment = C::read(reader, format)?;
+
+        Ok(Committed {
+            m_poly,
+            phi_poly,
+            commitment,
+        })
+    }
 }
 
 pub(in crate::plonk) struct Evaluated<C: CurveAffine> {
@@ -362,6 +394,7 @@ impl<C: CurveAffine> Prepared<C> {
         Ok(Committed {
             m_poly: pk.vk.domain.lagrange_to_coeff(self.m_values),
             phi_poly: pk.vk.domain.lagrange_to_coeff(phi),
+            commitment: phi_commitment,
         })
     }
 }

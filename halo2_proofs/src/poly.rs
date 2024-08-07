@@ -9,6 +9,7 @@ use crate::SerdeFormat;
 use group::ff::{BatchInvert, Field};
 #[cfg(feature = "parallel-poly-read")]
 use maybe_rayon::{iter::ParallelIterator, prelude::ParallelSliceMut};
+
 use std::fmt::Debug;
 use std::io;
 use std::marker::PhantomData;
