@@ -402,7 +402,7 @@ impl<C: CurveAffine> Evaluator<C> {
                     .collect()
             })
             .collect();
-        log::info!(" - Advice cosets: {:?}", start.elapsed());
+        log::trace!(" - Advice cosets: {:?}", start.elapsed());
 
         let start = std::time::Instant::now();
         let instance: Vec<Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>>> = instance_polys
@@ -414,7 +414,7 @@ impl<C: CurveAffine> Evaluator<C> {
                     .collect()
             })
             .collect();
-        log::info!(" - Instance cosets: {:?}", start.elapsed());
+        log::trace!(" - Instance cosets: {:?}", start.elapsed());
 
         let mut values = domain.empty_extended();
 
@@ -457,7 +457,7 @@ impl<C: CurveAffine> Evaluator<C> {
                     });
                 }
             });
-            log::info!(" - Custom gates: {:?}", start.elapsed());
+            log::trace!(" - Custom gates: {:?}", start.elapsed());
 
             // Permutations
             let start = std::time::Instant::now();
@@ -541,7 +541,7 @@ impl<C: CurveAffine> Evaluator<C> {
                     }
                 });
             }
-            log::info!(" - Permutations: {:?}", start.elapsed());
+            log::trace!(" - Permutations: {:?}", start.elapsed());
 
             let start = std::time::Instant::now();
             // For lookups, compute inputs_inv_sum = ∑ 1 / (f_i(X) + α)
@@ -602,7 +602,7 @@ impl<C: CurveAffine> Evaluator<C> {
                 })
                 .collect();
             #[cfg(feature = "mv-lookup")]
-            log::info!(" - Lookups inv sum: {:?}", start.elapsed());
+            log::trace!(" - Lookups inv sum: {:?}", start.elapsed());
 
             #[cfg(feature = "mv-lookup")]
             let start = std::time::Instant::now();
@@ -788,7 +788,7 @@ impl<C: CurveAffine> Evaluator<C> {
                     }
                 });
             }
-            log::info!(" - Lookups constraints: {:?}", start.elapsed());
+            log::trace!(" - Lookups constraints: {:?}", start.elapsed());
 
             // Shuffle constraints
             let start = std::time::Instant::now();
@@ -852,7 +852,7 @@ impl<C: CurveAffine> Evaluator<C> {
                     }
                 });
             }
-            log::info!(" - Shuffle constraints: {:?}", start.elapsed());
+            log::trace!(" - Shuffle constraints: {:?}", start.elapsed());
         }
         values
     }

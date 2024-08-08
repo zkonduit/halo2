@@ -95,7 +95,7 @@ where
     let start = Instant::now();
     // Hash verification key into transcript
     pk.vk.hash_into(transcript)?;
-    log::info!("Hashing verification key: {:?}", start.elapsed());
+    log::trace!("Hashing verification key: {:?}", start.elapsed());
 
     let domain = &pk.vk.domain;
     let mut meta = ConstraintSystem::default();
@@ -168,7 +168,7 @@ where
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    log::info!("Instance preparation: {:?}", start.elapsed());
+    log::trace!("Instance preparation: {:?}", start.elapsed());
 
     #[derive(Clone)]
     struct AdviceSingle<C: CurveAffine, B: Basis> {
@@ -462,12 +462,12 @@ where
 
         (advice, challenges)
     };
-    log::info!("Advice preparation: {:?}", start.elapsed());
+    log::trace!("Advice preparation: {:?}", start.elapsed());
 
     // Sample theta challenge for keeping lookup columns linearly independent
     let start = Instant::now();
     let theta: ChallengeTheta<_> = transcript.squeeze_challenge_scalar();
-    log::info!("Theta challenge: {:?}", start.elapsed());
+    log::trace!("Theta challenge: {:?}", start.elapsed());
 
     let start = Instant::now();
     #[cfg(feature = "mv-lookup")]
@@ -525,17 +525,17 @@ where
                 .collect()
         })
         .collect::<Result<Vec<_>, _>>()?;
-    log::info!("Lookup preparation: {:?}", start.elapsed());
+    log::trace!("Lookup preparation: {:?}", start.elapsed());
 
     // Sample beta challenge
     let start = Instant::now();
     let beta: ChallengeBeta<_> = transcript.squeeze_challenge_scalar();
-    log::info!("Beta challenge: {:?}", start.elapsed());
+    log::trace!("Beta challenge: {:?}", start.elapsed());
 
     // Sample gamma challenge
     let start = Instant::now();
     let gamma: ChallengeGamma<_> = transcript.squeeze_challenge_scalar();
-    log::info!("Gamma challenge: {:?}", start.elapsed());
+    log::trace!("Gamma challenge: {:?}", start.elapsed());
 
     // Commit to permutations.
     let start = Instant::now();
@@ -557,7 +557,7 @@ where
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    log::info!("Permutation commitment: {:?}", start.elapsed());
+    log::trace!("Permutation commitment: {:?}", start.elapsed());
 
     #[cfg(feature = "mv-lookup")]
     let commit_lookups = || -> Result<Vec<Vec<lookup::prover::Committed<Scheme::Curve>>>, _> {
@@ -595,7 +595,7 @@ where
         Some(cache_path) => {
             let cache_path = cache_path.join("lookup_commitments");
             if cache_path.exists() {
-                log::info!("Loading lookup commitments from cache");
+                log::trace!("Loading lookup commitments from cache");
                 let cache_file = std::fs::File::open(cache_path)?;
                 let mut cache_reader = std::io::BufReader::new(cache_file);
                 let lookups = (0..instance.len())
@@ -614,7 +614,7 @@ where
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(lookups)
             } else {
-                log::info!("Caching lookup commitments");
+                log::trace!("Caching lookup commitments");
                 let cache = commit_lookups()?;
                 let cache_file = std::fs::File::create(cache_path)?;
                 let mut cache_writer = std::io::BufWriter::new(cache_file);
@@ -630,7 +630,7 @@ where
         None => commit_lookups(),
     }?;
 
-    log::info!("Lookup commitment: {:?}", start.elapsed());
+    log::trace!("Lookup commitment: {:?}", start.elapsed());
 
     let start = Instant::now();
     let shuffles: Vec<Vec<shuffle::prover::Committed<Scheme::Curve>>> = instance
@@ -660,17 +660,17 @@ where
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
-    log::info!("Shuffle commitment: {:?}", start.elapsed());
+    log::trace!("Shuffle commitment: {:?}", start.elapsed());
 
     let start = Instant::now();
     // Commit to the vanishing argument's random polynomial for blinding h(x_3)
     let vanishing = vanishing::Argument::commit(params, domain, &mut rng, transcript)?;
-    log::info!("Vanishing commitment: {:?}", start.elapsed());
+    log::trace!("Vanishing commitment: {:?}", start.elapsed());
 
     // Obtain challenge for keeping all separate gates linearly independent
     let start = Instant::now();
     let y: ChallengeY<_> = transcript.squeeze_challenge_scalar();
-    log::info!("Y challenge: {:?}", start.elapsed());
+    log::trace!("Y challenge: {:?}", start.elapsed());
 
     // Calculate the advice polys
     let start = Instant::now();
@@ -691,7 +691,7 @@ where
             },
         )
         .collect();
-    log::info!("Advice calculation: {:?}", start.elapsed());
+    log::trace!("Advice calculation: {:?}", start.elapsed());
 
     // Evaluate the h(X) polynomial
     let start = Instant::now();
@@ -714,17 +714,17 @@ where
         &shuffles,
         &permutations,
     );
-    log::info!("H(X) evaluation: {:?}", start.elapsed());
+    log::trace!("H(X) evaluation: {:?}", start.elapsed());
 
     // Construct the vanishing argument's h(X) commitments
     let start = Instant::now();
     let vanishing = vanishing.construct(params, domain, h_poly, &mut rng, transcript)?;
-    log::info!("Vanishing construction: {:?}", start.elapsed());
+    log::trace!("Vanishing construction: {:?}", start.elapsed());
 
     let start = Instant::now();
     let x: ChallengeX<_> = transcript.squeeze_challenge_scalar();
     let xn = x.pow([params.n()]);
-    log::info!("X challenge: {:?}", start.elapsed());
+    log::trace!("X challenge: {:?}", start.elapsed());
 
     let start = Instant::now();
     if P::QUERY_INSTANCE {
@@ -748,7 +748,7 @@ where
             }
         }
     }
-    log::info!("Instance evaluation: {:?}", start.elapsed());
+    log::trace!("Instance evaluation: {:?}", start.elapsed());
 
     let start = Instant::now();
     // Compute and hash advice evals for each circuit instance
@@ -770,7 +770,7 @@ where
             transcript.write_scalar(*eval)?;
         }
     }
-    log::info!("Advice evaluation: {:?}", start.elapsed());
+    log::trace!("Advice evaluation: {:?}", start.elapsed());
 
     let start = Instant::now();
     // Compute and hash fixed evals (shared across all circuit instances)
@@ -781,23 +781,23 @@ where
             eval_polynomial(&pk.fixed_polys[column.index()], domain.rotate_omega(*x, at))
         })
         .collect();
-    log::info!("Fixed evaluation: {:?}", start.elapsed());
+    log::trace!("Fixed evaluation: {:?}", start.elapsed());
 
     // Hash each fixed column evaluation
     let start = Instant::now();
     for eval in fixed_evals.iter() {
         transcript.write_scalar(*eval)?;
     }
-    log::info!("Fixed evaluation hashing: {:?}", start.elapsed());
+    log::trace!("Fixed evaluation hashing: {:?}", start.elapsed());
 
     let start = Instant::now();
     let vanishing = vanishing.evaluate(x, xn, domain, transcript)?;
-    log::info!("Vanishing evaluation: {:?}", start.elapsed());
+    log::trace!("Vanishing evaluation: {:?}", start.elapsed());
 
     // Evaluate common permutation data
     let start = Instant::now();
     pk.permutation.evaluate(x, transcript)?;
-    log::info!("Permutation evaluation: {:?}", start.elapsed());
+    log::trace!("Permutation evaluation: {:?}", start.elapsed());
 
     // Evaluate the permutations, if any, at omega^i x.
     let start = Instant::now();
@@ -805,7 +805,7 @@ where
         .into_iter()
         .map(|permutation| -> Result<_, _> { permutation.construct().evaluate(pk, x, transcript) })
         .collect::<Result<Vec<_>, _>>()?;
-    log::info!("Permutation evaluation: {:?}", start.elapsed());
+    log::trace!("Permutation evaluation: {:?}", start.elapsed());
 
     // Evaluate the lookups, if any, at omega^i x.
     let start = Instant::now();
@@ -818,7 +818,7 @@ where
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
-    log::info!("Lookup evaluation: {:?}", start.elapsed());
+    log::trace!("Lookup evaluation: {:?}", start.elapsed());
 
     // Evaluate the shuffles, if any, at omega^i x.
     let start = Instant::now();
@@ -831,7 +831,7 @@ where
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
-    log::info!("Shuffle evaluation: {:?}", start.elapsed());
+    log::trace!("Shuffle evaluation: {:?}", start.elapsed());
 
     let start = Instant::now();
     let instances = instance
@@ -883,7 +883,7 @@ where
         .chain(pk.permutation.open(x))
         // We query the h(X) polynomial at x
         .chain(vanishing.open(x));
-    log::info!("Open queries: {:?}", start.elapsed());
+    log::trace!("Open queries: {:?}", start.elapsed());
 
     #[cfg(feature = "counter")]
     {
