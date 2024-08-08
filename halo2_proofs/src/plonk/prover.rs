@@ -11,13 +11,6 @@ use std::iter;
 use std::ops::RangeTo;
 use std::time::Instant;
 
-lazy_static::lazy_static! {
-    /// an optional directory to read and write the lookup table cache
-    static ref LOOKUP_COMMITMENT_CACHE: Option<std::path::PathBuf> = std::env::var("LOOKUP_COMMITMENT_CACHE")
-        .ok()
-        .map(std::path::PathBuf::from);
-}
-
 use super::{
     circuit::{
         sealed::{self},
@@ -590,45 +583,7 @@ where
     };
 
     let start = Instant::now();
-    // if LOOKUP_COMMITMENT_CACHE is set, try to load the lookup commitments from the cache
-    let lookups = match LOOKUP_COMMITMENT_CACHE.clone() {
-        Some(cache_path) => {
-            let cache_path = cache_path.join("lookup_commitments");
-            if cache_path.exists() {
-                log::trace!("Loading lookup commitments from cache");
-                let cache_file = std::fs::File::open(cache_path)?;
-                let mut cache_reader = std::io::BufReader::new(cache_file);
-                let lookups = (0..instance.len())
-                    .map(|_| {
-                        (0..pk.vk.cs.lookups.len())
-                            .map(|_| {
-                                let c = lookup::prover::Committed::read(
-                                    &mut cache_reader,
-                                    crate::SerdeFormat::RawBytesUnchecked,
-                                )?;
-                                transcript.write_point(c.commitment)?;
-                                Ok(c)
-                            })
-                            .collect::<std::io::Result<Vec<_>>>()
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(lookups)
-            } else {
-                log::trace!("Caching lookup commitments");
-                let cache = commit_lookups()?;
-                let cache_file = std::fs::File::create(cache_path)?;
-                let mut cache_writer = std::io::BufWriter::new(cache_file);
-                for lookup in &cache {
-                    for commitment in lookup {
-                        commitment
-                            .write(&mut cache_writer, crate::SerdeFormat::RawBytesUnchecked)?;
-                    }
-                }
-                Ok(cache)
-            }
-        }
-        None => commit_lookups(),
-    }?;
+    let lookups = commit_lookups()?;
 
     log::trace!("Lookup commitment: {:?}", start.elapsed());
 

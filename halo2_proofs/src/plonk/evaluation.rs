@@ -605,6 +605,20 @@ impl<C: CurveAffine> Evaluator<C> {
             log::trace!(" - Lookups inv sum: {:?}", start.elapsed());
 
             #[cfg(feature = "mv-lookup")]
+            let mut cosets: Vec<_> = {
+                let domain = &pk.vk.domain;
+                lookups
+                    .par_iter()
+                    .map(|lookup| {
+                        (
+                            domain.coeff_to_extended(lookup.phi_poly.clone()),
+                            domain.coeff_to_extended(lookup.m_poly.clone()),
+                        )
+                    })
+                    .collect()
+            };
+
+            #[cfg(feature = "mv-lookup")]
             let start = std::time::Instant::now();
             // Lookups
             #[cfg(feature = "mv-lookup")]
@@ -612,8 +626,9 @@ impl<C: CurveAffine> Evaluator<C> {
                 // Polynomials required for this lookup.
                 // Calculated here so these only have to be kept in memory for the short time
                 // they are actually needed.
-                let phi_coset = pk.vk.domain.coeff_to_extended(lookup.phi_poly.clone());
-                let m_coset = pk.vk.domain.coeff_to_extended(lookup.m_poly.clone());
+                let start = std::time::Instant::now();
+
+                let (phi_coset, m_coset) = &cosets.remove(0);
 
                 // Lookup constraints
                 /*
@@ -624,6 +639,7 @@ impl<C: CurveAffine> Evaluator<C> {
                         = (τ(X) * Π(φ_i(X)) * ∑ 1/(φ_i(X))) - Π(φ_i(X)) * m(X)
                         = Π(φ_i(X)) * (τ(X) * ∑ 1/(φ_i(X)) - m(X))
                 */
+                let start = std::time::Instant::now();
                 parallelize(&mut values, |values, start| {
                     let (inputs_lookup_evaluator, table_lookup_evaluator) = &self.lookups[n];
                     let mut inputs_eval_data: Vec<_> = inputs_lookup_evaluator
@@ -711,6 +727,7 @@ impl<C: CurveAffine> Evaluator<C> {
                         *value = *value * y + (lhs - rhs) * l_active_row[idx];
                     }
                 });
+                log::trace!(" - Lookups constraints: {:?}", start.elapsed());
             }
 
             #[cfg(not(feature = "mv-lookup"))]
@@ -719,16 +736,23 @@ impl<C: CurveAffine> Evaluator<C> {
                 // Polynomials required for this lookup.
                 // Calculated here so these only have to be kept in memory for the short time
                 // they are actually needed.
+                let start = std::time::Instant::now();
                 let product_coset = pk.vk.domain.coeff_to_extended(lookup.product_poly.clone());
+                log::trace!(" - Product coset: {:?}", start.elapsed());
+                let start = std::time::Instant::now();
                 let permuted_input_coset = pk
                     .vk
                     .domain
                     .coeff_to_extended(lookup.permuted_input_poly.clone());
+                log::trace!(" - Permuted input coset: {:?}", start.elapsed());
+                let start = std::time::Instant::now();
                 let permuted_table_coset = pk
                     .vk
                     .domain
                     .coeff_to_extended(lookup.permuted_table_poly.clone());
+                log::trace!(" - Permuted table coset: {:?}", start.elapsed());
 
+                let start = std::time::Instant::now();
                 // Lookup constraints
                 parallelize(&mut values, |values, start| {
                     let lookup_evaluator = &self.lookups[n];
@@ -787,6 +811,7 @@ impl<C: CurveAffine> Evaluator<C> {
                                 * l_active_row[idx]);
                     }
                 });
+                log::trace!(" - Lookups constraints: {:?}", start.elapsed());
             }
             log::trace!(" - Lookups constraints: {:?}", start.elapsed());
 

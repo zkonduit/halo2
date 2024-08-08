@@ -18,11 +18,11 @@ use group::{
     ff::{BatchInvert, Field},
     Curve,
 };
+use rustc_hash::FxHashMap as HashMap;
 
 use rand_core::RngCore;
 
 use std::{
-    collections::BTreeMap,
     iter,
     ops::{Mul, MulAssign},
 };
@@ -124,26 +124,33 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
             compressed_expression
         };
 
+        let start = std::time::Instant::now();
         // Get values of input expressions involved in the lookup and compress them
         let compressed_inputs_expressions: Vec<_> = self
             .inputs_expressions
             .iter()
             .map(|input_expressions| compress_expressions(input_expressions))
             .collect();
+        log::trace!("compressed_inputs_expressions {:?}", start.elapsed());
 
         // Get values of table expressions involved in the lookup and compress them
+        let start = std::time::Instant::now();
         let compressed_table_expression = compress_expressions(&self.table_expressions);
+        log::trace!("compressed_table_expression {:?}", start.elapsed());
 
         let blinding_factors = pk.vk.cs.blinding_factors();
 
         // compute m(X)
-        let table_index_value_mapping: BTreeMap<Vec<u8>, usize> = compressed_table_expression
+        let start = std::time::Instant::now();
+        let table_index_value_mapping: HashMap<Vec<u8>, usize> = compressed_table_expression
             .iter()
             .take(params.n() as usize - blinding_factors - 1)
             .enumerate()
             .map(|(i, &x)| (x.to_repr().as_ref().to_owned(), i))
             .collect();
+        log::trace!("table_index_value_mapping {:?}", start.elapsed());
 
+        let start = std::time::Instant::now();
         let m_values: Vec<F> = {
             use std::sync::atomic::{AtomicU64, Ordering};
             let m_values: Vec<AtomicU64> = (0..params.n()).map(|_| AtomicU64::new(0)).collect();
@@ -174,6 +181,7 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
                 .map(|mi| F::from(mi.load(Ordering::Relaxed)))
                 .collect()
         };
+        log::trace!("m_values {:?}", start.elapsed());
         let m_values = pk.vk.domain.lagrange_from_vec(m_values);
 
         #[cfg(feature = "sanity-checks")]
@@ -218,8 +226,10 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
         }
 
         // commit to m(X)
+        let start = std::time::Instant::now();
         let blind = Blind(C::Scalar::ZERO);
         let m_commitment = params.commit_lagrange(&m_values, blind).to_affine();
+        log::trace!("m_commitment {:?}", start.elapsed());
 
         // write commitment of m(X) to transcript
         transcript.write_point(m_commitment)?;
