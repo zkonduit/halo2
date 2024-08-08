@@ -15,6 +15,10 @@ use crate::{
 };
 
 use group::ff::{Field, PrimeField, WithSmallOrderMulGroup};
+use maybe_rayon::iter::IndexedParallelIterator;
+use maybe_rayon::iter::IntoParallelRefIterator;
+use maybe_rayon::iter::IntoParallelRefMutIterator;
+use maybe_rayon::iter::ParallelIterator;
 
 use super::{shuffle, ConstraintSystem, Expression};
 
@@ -387,29 +391,35 @@ impl<C: CurveAffine> Evaluator<C> {
         let l_active_row = &pk.l_active_row;
         let p = &pk.vk.cs.permutation;
 
+        let start = std::time::Instant::now();
         // Calculate the advice and instance cosets
         let advice: Vec<Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>>> = advice_polys
             .iter()
             .map(|advice_polys| {
                 advice_polys
-                    .iter()
+                    .par_iter()
                     .map(|poly| domain.coeff_to_extended(poly.clone()))
                     .collect()
             })
             .collect();
+        log::info!(" - Advice cosets: {:?}", start.elapsed());
+
+        let start = std::time::Instant::now();
         let instance: Vec<Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>>> = instance_polys
             .iter()
             .map(|instance_polys| {
                 instance_polys
-                    .iter()
+                    .par_iter()
                     .map(|poly| domain.coeff_to_extended(poly.clone()))
                     .collect()
             })
             .collect();
+        log::info!(" - Instance cosets: {:?}", start.elapsed());
 
         let mut values = domain.empty_extended();
 
         // Core expression evaluations
+
         let num_threads = multicore::current_num_threads();
         for ((((advice, instance), lookups), shuffles), permutation) in advice
             .iter()
@@ -419,6 +429,7 @@ impl<C: CurveAffine> Evaluator<C> {
             .zip(permutations.iter())
         {
             // Custom gates
+            let start = std::time::Instant::now();
             multicore::scope(|scope| {
                 let chunk_size = (size + num_threads - 1) / num_threads;
                 for (thread_idx, values) in values.chunks_mut(chunk_size).enumerate() {
@@ -446,8 +457,10 @@ impl<C: CurveAffine> Evaluator<C> {
                     });
                 }
             });
+            log::info!(" - Custom gates: {:?}", start.elapsed());
 
             // Permutations
+            let start = std::time::Instant::now();
             let sets = &permutation.sets;
             if !sets.is_empty() {
                 let blinding_factors = pk.vk.cs.blinding_factors();
@@ -528,14 +541,16 @@ impl<C: CurveAffine> Evaluator<C> {
                     }
                 });
             }
+            log::info!(" - Permutations: {:?}", start.elapsed());
 
+            let start = std::time::Instant::now();
             // For lookups, compute inputs_inv_sum = ∑ 1 / (f_i(X) + α)
             // The outer vector has capacity self.lookups.len()
             // The middle vector has capacity domain.extended_len()
             // The inner vector has capacity
             #[cfg(feature = "mv-lookup")]
             let inputs_inv_sum: Vec<Vec<Vec<_>>> = lookups
-                .iter()
+                .par_iter()
                 .enumerate()
                 .map(|(n, _)| {
                     let (inputs_lookup_evaluator, _) = &self.lookups[n];
@@ -550,8 +565,8 @@ impl<C: CurveAffine> Evaluator<C> {
                         // For each compressed input column, evaluate at ω^i and add beta
                         // This is a vector of length self.lookups[n].0.len()
                         let inputs_values: Vec<C::ScalarExt> = inputs_lookup_evaluator
-                            .iter()
-                            .zip(inputs_eval_data.iter_mut())
+                            .par_iter()
+                            .zip(inputs_eval_data.par_iter_mut())
                             .map(|(input_lookup_evaluator, input_eval_data)| {
                                 input_lookup_evaluator.evaluate(
                                     input_eval_data,
@@ -586,7 +601,11 @@ impl<C: CurveAffine> Evaluator<C> {
                     inputs_inv_sums
                 })
                 .collect();
+            #[cfg(feature = "mv-lookup")]
+            log::info!(" - Lookups inv sum: {:?}", start.elapsed());
 
+            #[cfg(feature = "mv-lookup")]
+            let start = std::time::Instant::now();
             // Lookups
             #[cfg(feature = "mv-lookup")]
             for (n, lookup) in lookups.iter().enumerate() {
@@ -769,8 +788,10 @@ impl<C: CurveAffine> Evaluator<C> {
                     }
                 });
             }
+            log::info!(" - Lookups constraints: {:?}", start.elapsed());
 
             // Shuffle constraints
+            let start = std::time::Instant::now();
             for (n, shuffle) in shuffles.iter().enumerate() {
                 let product_coset = pk.vk.domain.coeff_to_extended(shuffle.product_poly.clone());
 
@@ -831,6 +852,7 @@ impl<C: CurveAffine> Evaluator<C> {
                     }
                 });
             }
+            log::info!(" - Shuffle constraints: {:?}", start.elapsed());
         }
         values
     }
