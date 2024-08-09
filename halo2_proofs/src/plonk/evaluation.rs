@@ -604,7 +604,7 @@ impl<C: CurveAffine> Evaluator<C> {
             #[cfg(feature = "mv-lookup")]
             log::trace!(" - Lookups inv sum: {:?}", start.elapsed());
 
-            #[cfg(feature = "mv-lookup")]
+            #[cfg(all(feature = "mv-lookup", feature = "precompute-coset"))]
             let mut cosets: Vec<_> = {
                 let domain = &pk.vk.domain;
                 lookups
@@ -628,7 +628,13 @@ impl<C: CurveAffine> Evaluator<C> {
                 // they are actually needed.
                 let start = std::time::Instant::now();
 
+                #[cfg(feature = "precompute-coset")]
                 let (phi_coset, m_coset) = &cosets.remove(0);
+
+                #[cfg(not(feature = "precompute-coset"))]
+                let phi_coset = pk.vk.domain.coeff_to_extended(lookup.phi_poly.clone());
+                #[cfg(not(feature = "precompute-coset"))]
+                let m_coset = pk.vk.domain.coeff_to_extended(lookup.m_poly.clone());
 
                 // Lookup constraints
                 /*
@@ -730,27 +736,44 @@ impl<C: CurveAffine> Evaluator<C> {
                 log::trace!(" - Lookups constraints: {:?}", start.elapsed());
             }
 
+            #[cfg(all(not(feature = "mv-lookup"), feature = "precompute-coset"))]
+            let mut cosets: Vec<_> = {
+                let domain = &pk.vk.domain;
+                lookups
+                    .par_iter()
+                    .map(|lookup| {
+                        (
+                            domain.coeff_to_extended(lookup.product_poly.clone()),
+                            domain.coeff_to_extended(lookup.permuted_input_poly.clone()),
+                            domain.coeff_to_extended(lookup.permuted_table_poly.clone()),
+                        )
+                    })
+                    .collect()
+            };
+
             #[cfg(not(feature = "mv-lookup"))]
             // Lookups
             for (n, lookup) in lookups.iter().enumerate() {
                 // Polynomials required for this lookup.
                 // Calculated here so these only have to be kept in memory for the short time
                 // they are actually needed.
-                let start = std::time::Instant::now();
-                let product_coset = pk.vk.domain.coeff_to_extended(lookup.product_poly.clone());
-                log::trace!(" - Product coset: {:?}", start.elapsed());
-                let start = std::time::Instant::now();
-                let permuted_input_coset = pk
-                    .vk
-                    .domain
-                    .coeff_to_extended(lookup.permuted_input_poly.clone());
-                log::trace!(" - Permuted input coset: {:?}", start.elapsed());
-                let start = std::time::Instant::now();
-                let permuted_table_coset = pk
-                    .vk
-                    .domain
-                    .coeff_to_extended(lookup.permuted_table_poly.clone());
-                log::trace!(" - Permuted table coset: {:?}", start.elapsed());
+
+                #[cfg(feature = "precompute-coset")]
+                let (product_coset, permuted_input_coset, permuted_table_coset) = &cosets.remove(0);
+
+                #[cfg(not(feature = "precompute-coset"))]
+                let (product_coset, permuted_input_coset, permuted_table_coset) = {
+                    let product_coset = pk.vk.domain.coeff_to_extended(lookup.product_poly.clone());
+                    let permuted_input_coset = pk
+                        .vk
+                        .domain
+                        .coeff_to_extended(lookup.permuted_input_poly.clone());
+                    let permuted_table_coset = pk
+                        .vk
+                        .domain
+                        .coeff_to_extended(lookup.permuted_table_poly.clone());
+                    (product_coset, permuted_input_coset, permuted_table_coset)
+                };
 
                 let start = std::time::Instant::now();
                 // Lookup constraints
@@ -811,7 +834,6 @@ impl<C: CurveAffine> Evaluator<C> {
                                 * l_active_row[idx]);
                     }
                 });
-                log::trace!(" - Lookups constraints: {:?}", start.elapsed());
             }
             log::trace!(" - Lookups constraints: {:?}", start.elapsed());
 
