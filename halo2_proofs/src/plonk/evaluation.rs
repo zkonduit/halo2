@@ -604,7 +604,7 @@ impl<C: CurveAffine> Evaluator<C> {
             #[cfg(feature = "mv-lookup")]
             log::trace!(" - Lookups inv sum: {:?}", start.elapsed());
 
-            #[cfg(all(feature = "mv-lookup", feature = "precompute-coset"))]
+            #[cfg(all(feature = "mv-lookup"))]
             let mut cosets: Vec<_> = {
                 let domain = &pk.vk.domain;
                 lookups
@@ -622,31 +622,25 @@ impl<C: CurveAffine> Evaluator<C> {
             let start = std::time::Instant::now();
             // Lookups
             #[cfg(feature = "mv-lookup")]
-            for (n, lookup) in lookups.iter().enumerate() {
-                // Polynomials required for this lookup.
-                // Calculated here so these only have to be kept in memory for the short time
-                // they are actually needed.
-                let start = std::time::Instant::now();
+            parallelize(&mut values, |values, start| {
+                for (n, _lookup) in lookups.iter().enumerate() {
+                    // Polynomials required for this lookup.
+                    // Calculated here so these only have to be kept in memory for the short time
+                    // they are actually needed.
 
-                #[cfg(feature = "precompute-coset")]
-                let (phi_coset, m_coset) = &cosets.remove(0);
+                    #[cfg(feature = "precompute-coset")]
+                    let (phi_coset, m_coset) = &cosets[n];
 
-                #[cfg(not(feature = "precompute-coset"))]
-                let phi_coset = pk.vk.domain.coeff_to_extended(lookup.phi_poly.clone());
-                #[cfg(not(feature = "precompute-coset"))]
-                let m_coset = pk.vk.domain.coeff_to_extended(lookup.m_poly.clone());
+                    // Lookup constraints
+                    /*
+                        φ_i(X) = f_i(X) + α
+                        τ(X) = t(X) + α
+                        LHS = τ(X) * Π(φ_i(X)) * (ϕ(gX) - ϕ(X))
+                        RHS = τ(X) * Π(φ_i(X)) * (∑ 1/(φ_i(X)) - m(X) / τ(X))))
+                            = (τ(X) * Π(φ_i(X)) * ∑ 1/(φ_i(X))) - Π(φ_i(X)) * m(X)
+                            = Π(φ_i(X)) * (τ(X) * ∑ 1/(φ_i(X)) - m(X))
+                    */
 
-                // Lookup constraints
-                /*
-                    φ_i(X) = f_i(X) + α
-                    τ(X) = t(X) + α
-                    LHS = τ(X) * Π(φ_i(X)) * (ϕ(gX) - ϕ(X))
-                    RHS = τ(X) * Π(φ_i(X)) * (∑ 1/(φ_i(X)) - m(X) / τ(X))))
-                        = (τ(X) * Π(φ_i(X)) * ∑ 1/(φ_i(X))) - Π(φ_i(X)) * m(X)
-                        = Π(φ_i(X)) * (τ(X) * ∑ 1/(φ_i(X)) - m(X))
-                */
-                let start = std::time::Instant::now();
-                parallelize(&mut values, |values, start| {
                     let (inputs_lookup_evaluator, table_lookup_evaluator) = &self.lookups[n];
                     let mut inputs_eval_data: Vec<_> = inputs_lookup_evaluator
                         .iter()
@@ -732,9 +726,12 @@ impl<C: CurveAffine> Evaluator<C> {
                         // q(X) = LHS - RHS mod zH(X)
                         *value = *value * y + (lhs - rhs) * l_active_row[idx];
                     }
-                });
-                log::trace!(" - Lookups constraints: {:?}", start.elapsed());
-            }
+                }
+            });
+
+            // delete the cosets
+            #[cfg(feature = "mv-lookup")]
+            cosets.clear();
 
             #[cfg(all(not(feature = "mv-lookup"), feature = "precompute-coset"))]
             let mut cosets: Vec<_> = {

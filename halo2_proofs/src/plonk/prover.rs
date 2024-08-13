@@ -20,6 +20,9 @@ use super::{
     permutation, shuffle, vanishing, ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX,
     ChallengeY, Error, ProvingKey,
 };
+use maybe_rayon::iter::IntoParallelIterator;
+use maybe_rayon::iter::IntoParallelRefIterator;
+use maybe_rayon::iter::ParallelIterator;
 
 #[cfg(not(feature = "mv-lookup"))]
 use super::lookup;
@@ -50,7 +53,7 @@ pub fn create_proof<
     Scheme: CommitmentScheme,
     P: Prover<'params, Scheme>,
     E: EncodedChallenge<Scheme::Curve>,
-    R: RngCore,
+    R: RngCore + Send + Sync,
     T: TranscriptWrite<Scheme::Curve, E>,
     ConcreteCircuit: Circuit<Scheme::Scalar>,
 >(
@@ -64,6 +67,7 @@ pub fn create_proof<
 where
     Scheme::Scalar: WithSmallOrderMulGroup<3> + FromUniformBytes<64> + SerdeObject,
     Scheme::Curve: SerdeObject,
+    Scheme::ParamsProver: Send + Sync,
 {
     #[cfg(feature = "counter")]
     {
@@ -469,13 +473,14 @@ where
         .zip(advice.iter())
         .map(|(instance, advice)| -> Result<Vec<_>, Error> {
             // Construct and commit to permuted values for each lookup
-            pk.vk
+            let res: Result<Vec<_>, Error> = pk
+                .vk
                 .cs
                 .lookups
-                .iter()
+                .par_iter()
                 .map(|lookup| {
                     lookup.prepare(
-                        pk,
+                        &pk.vk,
                         params,
                         domain,
                         theta,
@@ -483,11 +488,15 @@ where
                         &pk.fixed_values,
                         &instance.instance_values,
                         &challenges,
-                        &mut rng,
-                        transcript,
                     )
                 })
-                .collect()
+                .collect();
+            res.iter().for_each(|lookups| {
+                lookups.iter().for_each(|lookup| {
+                    transcript.write_point(lookup.commitment);
+                });
+            });
+            res
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -552,16 +561,25 @@ where
         .collect::<Result<Vec<_>, _>>()?;
     log::trace!("Permutation commitment: {:?}", start.elapsed());
 
+    // preallocate the lookups
+
     #[cfg(feature = "mv-lookup")]
     let commit_lookups = || -> Result<Vec<Vec<lookup::prover::Committed<Scheme::Curve>>>, _> {
         lookups
             .into_iter()
             .map(|lookups| -> Result<Vec<_>, _> {
                 // Construct and commit to products for each lookup
-                lookups
-                    .into_iter()
-                    .map(|lookup| lookup.commit_grand_sum(pk, params, beta, &mut rng, transcript))
-                    .collect::<Result<Vec<_>, _>>()
+                let res = lookups
+                    .into_par_iter()
+                    .map(|lookup| lookup.commit_grand_sum(&pk.vk, params, beta))
+                    .collect::<Result<Vec<_>, _>>();
+
+                res.iter().for_each(|lookups| {
+                    lookups.iter().for_each(|lookup| {
+                        transcript.write_point(lookup.commitment);
+                    });
+                });
+                res
             })
             .collect::<Result<Vec<_>, _>>()
     };
@@ -769,7 +787,7 @@ where
         .map(|lookups| -> Result<Vec<_>, _> {
             lookups
                 .into_iter()
-                .map(|p| p.evaluate(pk, x, transcript))
+                .map(|p| p.evaluate(&pk.vk, x, transcript))
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
