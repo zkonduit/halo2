@@ -1,5 +1,8 @@
 use ff::Field;
 use group::Curve;
+use maybe_rayon::iter::IndexedParallelIterator;
+use maybe_rayon::iter::IntoParallelRefIterator;
+use maybe_rayon::iter::ParallelIterator;
 use rand_chacha::ChaCha20Rng;
 use rand_core::{RngCore, SeedableRng};
 use rustc_hash::FxHashMap as HashMap;
@@ -96,7 +99,7 @@ impl<C: CurveAffine> Argument<C> {
 impl<C: CurveAffine> Committed<C> {
     pub(in crate::plonk) fn construct<
         'params,
-        P: ParamsProver<'params, C>,
+        P: ParamsProver<'params, C> + Send + Sync,
         E: EncodedChallenge<C>,
         R: RngCore,
         T: TranscriptWrite<C, E>,
@@ -127,8 +130,8 @@ impl<C: CurveAffine> Committed<C> {
 
         // Compute commitments to each h(X) piece
         let h_commitments_projective: Vec<_> = h_pieces
-            .iter()
-            .zip(h_blinds.iter())
+            .par_iter()
+            .zip(h_blinds.par_iter())
             .map(|(h_piece, blind)| params.commit(h_piece, *blind))
             .collect();
         let mut h_commitments = vec![C::identity(); h_commitments_projective.len()];

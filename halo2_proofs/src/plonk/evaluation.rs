@@ -379,6 +379,7 @@ impl<C: CurveAffine> Evaluator<C> {
         shuffles: &[Vec<shuffle::prover::Committed<C>>],
         permutations: &[permutation::prover::Committed<C>],
     ) -> Polynomial<C::ScalarExt, ExtendedLagrangeCoeff> {
+        let start = std::time::Instant::now();
         let domain = &pk.vk.domain;
         let size = domain.extended_len();
         let rot_scale = 1 << (domain.extended_k() - domain.k());
@@ -390,6 +391,7 @@ impl<C: CurveAffine> Evaluator<C> {
         let l_last = &pk.l_last;
         let l_active_row = &pk.l_active_row;
         let p = &pk.vk.cs.permutation;
+        log::trace!(" - Initialization: {:?}", start.elapsed());
 
         let start = std::time::Instant::now();
         // Calculate the advice and instance cosets
@@ -420,6 +422,7 @@ impl<C: CurveAffine> Evaluator<C> {
 
         // Core expression evaluations
 
+        let start = std::time::Instant::now();
         let num_threads = multicore::current_num_threads();
         for ((((advice, instance), lookups), shuffles), permutation) in advice
             .iter()
@@ -429,7 +432,7 @@ impl<C: CurveAffine> Evaluator<C> {
             .zip(permutations.iter())
         {
             // Custom gates
-            let start = std::time::Instant::now();
+
             multicore::scope(|scope| {
                 let chunk_size = (size + num_threads - 1) / num_threads;
                 for (thread_idx, values) in values.chunks_mut(chunk_size).enumerate() {
@@ -549,10 +552,10 @@ impl<C: CurveAffine> Evaluator<C> {
             // The middle vector has capacity domain.extended_len()
             // The inner vector has capacity
             #[cfg(feature = "mv-lookup")]
-            let inputs_inv_sum: Vec<Vec<Vec<_>>> = lookups
+            let mut inputs_inv_sum_cosets: Vec<_> = lookups
                 .par_iter()
                 .enumerate()
-                .map(|(n, _)| {
+                .map(|(n, lookup)| {
                     let (inputs_lookup_evaluator, _) = &self.lookups[n];
                     let mut inputs_eval_data: Vec<_> = inputs_lookup_evaluator
                         .iter()
@@ -598,25 +601,15 @@ impl<C: CurveAffine> Evaluator<C> {
                         .map(|c| c.to_vec())
                         .collect();
 
-                    inputs_inv_sums
+                    (
+                        inputs_inv_sums,
+                        domain.coeff_to_extended(lookup.phi_poly.clone()),
+                        domain.coeff_to_extended(lookup.m_poly.clone()),
+                    )
                 })
                 .collect();
             #[cfg(feature = "mv-lookup")]
             log::trace!(" - Lookups inv sum: {:?}", start.elapsed());
-
-            #[cfg(all(feature = "mv-lookup"))]
-            let mut cosets: Vec<_> = {
-                let domain = &pk.vk.domain;
-                lookups
-                    .par_iter()
-                    .map(|lookup| {
-                        (
-                            domain.coeff_to_extended(lookup.phi_poly.clone()),
-                            domain.coeff_to_extended(lookup.m_poly.clone()),
-                        )
-                    })
-                    .collect()
-            };
 
             #[cfg(feature = "mv-lookup")]
             let start = std::time::Instant::now();
@@ -628,8 +621,7 @@ impl<C: CurveAffine> Evaluator<C> {
                     // Calculated here so these only have to be kept in memory for the short time
                     // they are actually needed.
 
-                    #[cfg(feature = "precompute-coset")]
-                    let (phi_coset, m_coset) = &cosets[n];
+                    let (inputs_inv_sum, phi_coset, m_coset) = &inputs_inv_sum_cosets[n];
 
                     // Lookup constraints
                     /*
@@ -681,7 +673,7 @@ impl<C: CurveAffine> Evaluator<C> {
                             .fold(C::Scalar::ONE, |acc, input| acc * input);
 
                         // f_i(X) + α at ω^idx
-                        let fi_inverses = &inputs_inv_sum[n][idx];
+                        let fi_inverses = &inputs_inv_sum[idx];
                         let inputs_inv_sum = fi_inverses
                             .iter()
                             .fold(C::Scalar::ZERO, |acc, input| acc + input);
@@ -731,7 +723,7 @@ impl<C: CurveAffine> Evaluator<C> {
 
             // delete the cosets
             #[cfg(feature = "mv-lookup")]
-            cosets.clear();
+            drop(inputs_inv_sum_cosets);
 
             #[cfg(all(not(feature = "mv-lookup"), feature = "precompute-coset"))]
             let mut cosets: Vec<_> = {

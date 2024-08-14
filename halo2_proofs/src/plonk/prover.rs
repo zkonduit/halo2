@@ -20,6 +20,7 @@ use super::{
     permutation, shuffle, vanishing, ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX,
     ChallengeY, Error, ProvingKey,
 };
+use maybe_rayon::iter::IndexedParallelIterator;
 use maybe_rayon::iter::IntoParallelIterator;
 use maybe_rayon::iter::IntoParallelRefIterator;
 use maybe_rayon::iter::ParallelIterator;
@@ -469,12 +470,11 @@ where
     let start = Instant::now();
     #[cfg(feature = "mv-lookup")]
     let lookups: Vec<Vec<lookup::prover::Prepared<Scheme::Curve>>> = instance
-        .iter()
-        .zip(advice.iter())
+        .par_iter()
+        .zip(advice.par_iter())
         .map(|(instance, advice)| -> Result<Vec<_>, Error> {
             // Construct and commit to permuted values for each lookup
-            let res: Result<Vec<_>, Error> = pk
-                .vk
+            pk.vk
                 .cs
                 .lookups
                 .par_iter()
@@ -490,15 +490,16 @@ where
                         &challenges,
                     )
                 })
-                .collect();
-            res.iter().for_each(|lookups| {
-                lookups.iter().for_each(|lookup| {
-                    transcript.write_point(lookup.commitment);
-                });
-            });
-            res
+                .collect()
         })
         .collect::<Result<Vec<_>, _>>()?;
+
+    #[cfg(feature = "mv-lookup")]
+    lookups.iter().for_each(|lookups| {
+        lookups.iter().for_each(|lookup| {
+            transcript.write_point(lookup.commitment);
+        });
+    });
 
     #[cfg(not(feature = "mv-lookup"))]
     let lookups: Vec<Vec<lookup::prover::Permuted<Scheme::Curve>>> = instance
@@ -574,11 +575,6 @@ where
                     .map(|lookup| lookup.commit_grand_sum(&pk.vk, params, beta))
                     .collect::<Result<Vec<_>, _>>();
 
-                res.iter().for_each(|lookups| {
-                    lookups.iter().for_each(|lookup| {
-                        transcript.write_point(lookup.commitment);
-                    });
-                });
                 res
             })
             .collect::<Result<Vec<_>, _>>()
@@ -602,6 +598,13 @@ where
 
     let start = Instant::now();
     let lookups = commit_lookups()?;
+
+    #[cfg(feature = "mv-lookup")]
+    lookups.iter().for_each(|lookups| {
+        lookups.iter().for_each(|lookup| {
+            transcript.write_point(lookup.commitment);
+        });
+    });
 
     log::trace!("Lookup commitment: {:?}", start.elapsed());
 
