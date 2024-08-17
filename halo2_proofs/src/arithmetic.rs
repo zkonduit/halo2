@@ -11,8 +11,26 @@ pub use halo2curves::{CurveAffine, CurveExt};
 
 #[cfg(feature = "icicle_gpu")]
 use super::icicle;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+use lazy_static;
 #[cfg(feature = "icicle_gpu")]
 use rustacuda::prelude::DeviceBuffer;
+
+lazy_static::lazy_static! {
+    /// a
+    pub static ref TOTAL_DURATION_FFT: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    /// a
+    pub static ref TOTAL_FFT: Mutex<u64> = Mutex::new(0);
+    /// b
+    pub static ref TOTAL_DURATION_PARALLELIZE: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    /// c
+    pub static ref TOTAL_DURATION_INNER_PRODUCT: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    /// d
+    pub static ref TOTAL_DURATION_EVAL_POLY: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    /// e
+    pub static ref TOTAL_DURATION_MULTI_EXP: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+}
 
 /// This represents an element of a group with basic operations that can be
 /// performed. This allows an FFT implementation (for example) to operate
@@ -146,10 +164,16 @@ pub fn small_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::C
 #[cfg(feature = "icicle_gpu")]
 /// Performs a multi-exponentiation operation on GPU using Icicle library
 pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], is_lagrange: bool) -> C::Curve {
+    let start_time: Instant = Instant::now();
+
     let scalars_ptr: DeviceBuffer<::icicle::curves::bn254::ScalarField_BN254> =
         icicle::copy_scalars_to_device::<C>(coeffs);
 
-    return icicle::multiexp_on_device::<C>(scalars_ptr, is_lagrange);
+    let res = icicle::multiexp_on_device::<C>(scalars_ptr, is_lagrange);
+    let mut total_duration = TOTAL_DURATION_MULTI_EXP.lock().unwrap();
+    *total_duration += start_time.elapsed();
+    
+    res
 }
 
 /// Performs a multi-exponentiation operation.
@@ -158,6 +182,7 @@ pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], is_lagrange: bool
 ///
 /// This will use multithreading if beneficial.
 pub fn best_multiexp_cpu<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
+    let start_time: Instant = Instant::now();
     assert_eq!(coeffs.len(), bases.len());
 
     let num_threads = multicore::current_num_threads();
@@ -178,10 +203,16 @@ pub fn best_multiexp_cpu<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C
                 });
             }
         });
-        results.iter().fold(C::Curve::identity(), |a, b| a + b)
+        let res = results.iter().fold(C::Curve::identity(), |a, b| a + b);
+
+        let mut total_duration = TOTAL_DURATION_MULTI_EXP.lock().unwrap();
+        *total_duration += start_time.elapsed();
+        res
     } else {
         let mut acc = C::Curve::identity();
         multiexp_serial(coeffs, bases, &mut acc);
+        let mut total_duration = TOTAL_DURATION_MULTI_EXP.lock().unwrap();
+        *total_duration += start_time.elapsed();
         acc
     }
 }
@@ -197,6 +228,7 @@ pub fn best_multiexp_cpu<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C
 ///
 /// This will use multithreading if beneficial.
 pub fn best_fft<Scalar: Field, G: FftGroup<Scalar>>(a: &mut [G], omega: Scalar, log_n: u32) {
+    let start_time = Instant::now();
     fn bitreverse(mut n: usize, l: usize) -> usize {
         let mut r = 0;
         for _ in 0..l {
@@ -226,7 +258,6 @@ pub fn best_fft<Scalar: Field, G: FftGroup<Scalar>>(a: &mut [G], omega: Scalar, 
             Some(tw)
         })
         .collect();
-
     if log_n <= log_threads {
         let mut chunk = 2_usize;
         let mut twiddle_chunk = n / 2;
@@ -257,8 +288,17 @@ pub fn best_fft<Scalar: Field, G: FftGroup<Scalar>>(a: &mut [G], omega: Scalar, 
             twiddle_chunk /= 2;
         }
     } else {
-        recursive_butterfly_arithmetic(a, n, 1, &twiddles)
+        let res = recursive_butterfly_arithmetic(a, n, 1, &twiddles);
+
+        let mut total_duration = TOTAL_DURATION_FFT.lock().unwrap();
+        let mut total_count = TOTAL_FFT.lock().unwrap();
+        *total_count += 1;
+
+        *total_duration += start_time.elapsed();
+        res
     }
+
+    
 }
 
 /// This perform recursive butterfly arithmetic
@@ -330,6 +370,7 @@ pub fn g_to_lagrange<C: CurveAffine>(g_projective: Vec<C::Curve>, k: u32) -> Vec
 
 /// This evaluates a provided polynomial (in coefficient form) at `point`.
 pub fn eval_polynomial<F: Field>(poly: &[F], point: F) -> F {
+    let start_time = Instant::now();
     fn evaluate<F: Field>(poly: &[F], point: F) -> F {
         poly.iter()
             .rev()
@@ -337,8 +378,9 @@ pub fn eval_polynomial<F: Field>(poly: &[F], point: F) -> F {
     }
     let n = poly.len();
     let num_threads = multicore::current_num_threads();
+    let res;
     if n * 2 < num_threads {
-        evaluate(poly, point)
+        res = evaluate(poly, point);
     } else {
         let chunk_size = (n + num_threads - 1) / num_threads;
         let mut parts = vec![F::ZERO; num_threads];
@@ -352,8 +394,12 @@ pub fn eval_polynomial<F: Field>(poly: &[F], point: F) -> F {
                 });
             }
         });
-        parts.iter().fold(F::ZERO, |acc, coeff| acc + coeff)
+        res = parts.iter().fold(F::ZERO, |acc, coeff| acc + coeff);
     }
+
+    let mut total_duration = TOTAL_DURATION_EVAL_POLY.lock().unwrap();
+    *total_duration += start_time.elapsed();
+    res
 }
 
 /// This computes the inner product of two vectors `a` and `b`.
@@ -361,6 +407,8 @@ pub fn eval_polynomial<F: Field>(poly: &[F], point: F) -> F {
 /// This function will panic if the two vectors are not the same size.
 pub fn compute_inner_product<F: Field>(a: &[F], b: &[F]) -> F {
     // TODO: parallelize?
+    let start_time = Instant::now();
+    
     assert_eq!(a.len(), b.len());
 
     let mut acc = F::ZERO;
@@ -368,6 +416,8 @@ pub fn compute_inner_product<F: Field>(a: &[F], b: &[F]) -> F {
         acc += (*a) * (*b);
     }
 
+    let mut total_duration = TOTAL_DURATION_INNER_PRODUCT.lock().unwrap();
+    *total_duration += start_time.elapsed();
     acc
 }
 
@@ -397,6 +447,7 @@ where
 /// This utility function will parallelize an operation that is to be
 /// performed over a mutable slice.
 pub fn parallelize<T: Send, F: Fn(&mut [T], usize) + Send + Sync + Clone>(v: &mut [T], f: F) {
+    let start_time = Instant::now();
     // Algorithm rationale:
     //
     // Using the stdlib `chunks_mut` will lead to severe load imbalance.
@@ -444,6 +495,9 @@ pub fn parallelize<T: Send, F: Fn(&mut [T], usize) + Send + Sync + Clone>(v: &mu
             }
         }
     });
+
+    let mut total_duration = TOTAL_DURATION_PARALLELIZE.lock().unwrap();
+    *total_duration += start_time.elapsed();
 }
 
 fn log2_floor(num: usize) -> u32 {
