@@ -1,0 +1,12 @@
+[meta]
+	isLocalConfig = true
+[user]
+	name = emirsoyturk
+	email = emir@ingonyama.com
+	signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKXLwTO2YQfFY1m23wr/hH4Tvl9vmKmcH582Ot1Wqfzs emir@ingonyama.com
+[commit]
+	gpgsign = true
+[gpg]
+	format = ssh
+[url "git@github.com:"]
+	insteadOf = https://github.com/

@@ -22,7 +22,7 @@ use super::lookup;
 use super::mv_lookup as lookup;
 
 use crate::{
-    arithmetic::{eval_polynomial, CurveAffine, TOTAL_DURATION_EVAL_POLY, TOTAL_FFT, TOTAL_DURATION_MULTI_EXP, TOTAL_DURATION_FFT, TOTAL_DURATION_INNER_PRODUCT, TOTAL_DURATION_PARALLELIZE},
+    arithmetic::{eval_polynomial, CurveAffine, TOTAL_DURATION_EVAL_POLY, TOTAL_FFT, TOTAL_DURATION_MULTI_EXP_GPU, TOTAL_DURATION_MULTI_EXP_CPU, TOTAL_DURATION_FFT, TOTAL_DURATION_INNER_PRODUCT, TOTAL_DURATION_PARALLELIZE},
     circuit::Value,
     plonk::Assigned,
     poly::{
@@ -832,7 +832,8 @@ where
     println!("TOTAL_DURATION_INNER_PRODUCT: {:?}", TOTAL_DURATION_INNER_PRODUCT.lock().unwrap());
     println!("TOTAL_DURATION_EVAL_POLY: {:?}", TOTAL_DURATION_EVAL_POLY.lock().unwrap());
     println!("TOTAL_DURATION_PARALLELIZE: {:?}", TOTAL_DURATION_PARALLELIZE.lock().unwrap());
-    println!("TOTAL_DURATION_MULTI_EXP: {:?}", TOTAL_DURATION_MULTI_EXP.lock().unwrap());
+    println!("TOTAL_DURATION_MULTI_EXP_GPU: {:?}", TOTAL_DURATION_MULTI_EXP_GPU.lock().unwrap());
+    println!("TOTAL_DURATION_MULTI_EXP_CPU: {:?}", TOTAL_DURATION_MULTI_EXP_CPU.lock().unwrap());
 
     res
 }
