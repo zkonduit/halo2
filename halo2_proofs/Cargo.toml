@@ -63,7 +63,9 @@ lazy_static = { version = "1", optional = true }
 env_logger = "0.10.0"
 
 # GPU Icicle integration
-icicle = { git = "https://github.com/ingonyama-zk/icicle.git", branch = "rust/large-bucket-factor-msm", optional = true }
+icicle-core = { git = "https://github.com/ingonyama-zk/icicle.git", optional = true }
+icicle-bn254 = { git = "https://github.com/ingonyama-zk/icicle.git", optional = true }
+icicle-cuda-runtime = { git = "https://github.com/ingonyama-zk/icicle.git", optional = true }
 rustacuda = { version = "0.1", optional = true }
 serde = { version = "1", optional = true, features = ["derive"] }
 serde_derive = { version = "1", optional = true}
@@ -74,6 +76,7 @@ tabbycat = { version = "0.1", features = ["attributes"], optional = true }
 
 # Legacy circuit compatibility
 halo2_legacy_pdqsort = { version = "0.1.0", optional = true }
+subtle = "2.6.1"
 
 [dev-dependencies]
 assert_matches = "1.5"
@@ -97,7 +100,7 @@ sanity-checks = []
 batch = ["rand_core/getrandom"]
 circuit-params = []
 counter = ["lazy_static"]
-icicle_gpu = ["icicle", "rustacuda"]
+icicle_gpu = ["icicle-cuda-runtime", "icicle-bn254", "icicle-core"]
 mv-lookup = []
 cost-estimator = ["serde", "serde_derive"]
 derive_serde = ["halo2curves/derive_serde"]

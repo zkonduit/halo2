@@ -1,9 +1,9 @@
-use crate::arithmetic::{best_multiexp_cpu, g_to_lagrange, parallelize};
+use crate::arithmetic::{best_multiexp, g_to_lagrange, parallelize};
 
 #[cfg(feature = "icicle_gpu")]
 use crate::arithmetic::best_multiexp_gpu;
 #[cfg(feature = "icicle_gpu")]
-use crate::icicle;
+use crate::icicle_helper;
 #[cfg(feature = "icicle_gpu")]
 use std::env;
 
@@ -125,11 +125,6 @@ where
             g_lagrange
         };
 
-        #[cfg(feature = "icicle_gpu")]
-        if env::var("ENABLE_ICICLE_GPU").is_ok() {
-            icicle::init_gpu::<E::G1Affine>(&g, &g_lagrange);
-        }
-
         let g2 = <E::G2Affine as PrimeCurveAffine>::generator();
         let s_g2 = (g2 * s).into();
 
@@ -163,11 +158,6 @@ where
             Some(g_l) => g_l,
             None => g_to_lagrange(g.iter().map(PrimeCurveAffine::to_curve).collect(), k),
         };
-
-        #[cfg(feature = "icicle_gpu")]
-        if env::var("ENABLE_ICICLE_GPU").is_ok() {
-            icicle::init_gpu::<E::G1Affine>(&g, &g_lagrange);
-        }
 
         Self {
             k,
@@ -279,11 +269,6 @@ where
             }
         };
 
-        #[cfg(feature = "icicle_gpu")]
-        if env::var("ENABLE_ICICLE_GPU").is_ok() {
-            icicle::init_gpu::<E::G1Affine>(&g, &g_lagrange);
-        }
-
         let g2 = E::G2Affine::read(reader, format)?;
         let s_g2 = E::G2Affine::read(reader, format)?;
 
@@ -340,15 +325,7 @@ where
         let size = scalars.len();
         assert!(bases.len() >= size);
 
-        #[cfg(feature = "icicle_gpu")]
-        if env::var("ENABLE_ICICLE_GPU").is_ok() && !icicle::should_use_cpu_msm(size) {
-            best_multiexp_gpu::<E::G1Affine>(&scalars, true)
-        } else {
-            best_multiexp_cpu(&scalars, &bases[0..size])
-        }
-
-        #[cfg(not(feature = "icicle_gpu"))]
-        best_multiexp_cpu(&scalars, &bases[0..size])
+        best_multiexp(&scalars, &bases[0..size])
     }
 
     /// Writes params to a buffer.
@@ -392,16 +369,7 @@ where
         let bases = &self.g;
         let size = scalars.len();
         assert!(bases.len() >= size);
-
-        #[cfg(feature = "icicle_gpu")]
-        if env::var("ENABLE_ICICLE_GPU").is_ok() && !icicle::should_use_cpu_msm(size) {
-            best_multiexp_gpu::<E::G1Affine>(&scalars, false)
-        } else {
-            best_multiexp_cpu(&scalars, &bases[0..size])
-        }
-
-        #[cfg(not(feature = "icicle_gpu"))]
-        best_multiexp_cpu(&scalars, &bases[0..size])
+        best_multiexp(&scalars, &bases[0..size])
     }
 
     fn get_g(&self) -> &[E::G1Affine] {

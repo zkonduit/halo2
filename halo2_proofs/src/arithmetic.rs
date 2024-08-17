@@ -8,14 +8,11 @@ use group::{
     Curve, Group, GroupOpsOwned, ScalarMulOwned,
 };
 pub use halo2curves::{CurveAffine, CurveExt};
-
 #[cfg(feature = "icicle_gpu")]
-use super::icicle;
+use super::icicle_helper;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use lazy_static;
-#[cfg(feature = "icicle_gpu")]
-use rustacuda::prelude::DeviceBuffer;
 
 lazy_static::lazy_static! {
     /// a
@@ -29,7 +26,9 @@ lazy_static::lazy_static! {
     /// d
     pub static ref TOTAL_DURATION_EVAL_POLY: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
     /// e
-    pub static ref TOTAL_DURATION_MULTI_EXP: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    pub static ref TOTAL_DURATION_MULTI_EXP_CPU: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    /// f
+    pub static ref TOTAL_DURATION_MULTI_EXP_GPU: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
 }
 
 /// This represents an element of a group with basic operations that can be
@@ -163,16 +162,28 @@ pub fn small_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::C
 
 #[cfg(feature = "icicle_gpu")]
 /// Performs a multi-exponentiation operation on GPU using Icicle library
-pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], is_lagrange: bool) -> C::Curve {
+pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], g: &[C]) -> C::Curve {
     let start_time: Instant = Instant::now();
 
-    let scalars_ptr: DeviceBuffer<::icicle::curves::bn254::ScalarField_BN254> =
-        icicle::copy_scalars_to_device::<C>(coeffs);
-
-    let res = icicle::multiexp_on_device::<C>(scalars_ptr, is_lagrange);
-    let mut total_duration = TOTAL_DURATION_MULTI_EXP.lock().unwrap();
+    let res = icicle_helper::multiexp_on_device::<C>(coeffs, g);
+    let mut total_duration = TOTAL_DURATION_MULTI_EXP_GPU.lock().unwrap();
     *total_duration += start_time.elapsed();
     
+    res
+}
+
+/// Performs a multi-exponentiation operation
+pub fn best_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
+    let res = best_multiexp_cpu(coeffs, bases);
+    println!("msm result: {:?}", res);
+
+    #[cfg(feature = "icicle_gpu")]
+    if !icicle_helper::should_use_cpu_msm(bases.len())
+    {
+        let res = best_multiexp_gpu(coeffs, bases);
+        println!("msm result: {:?}", res);
+    }
+
     res
 }
 
@@ -184,6 +195,9 @@ pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], is_lagrange: bool
 pub fn best_multiexp_cpu<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
     let start_time: Instant = Instant::now();
     assert_eq!(coeffs.len(), bases.len());
+
+    // println!("coeffs cpu: {:?}", coeffs);
+    // println!("bases cpu: {:?}", bases);
 
     let num_threads = multicore::current_num_threads();
     if coeffs.len() > num_threads {
@@ -205,13 +219,13 @@ pub fn best_multiexp_cpu<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C
         });
         let res = results.iter().fold(C::Curve::identity(), |a, b| a + b);
 
-        let mut total_duration = TOTAL_DURATION_MULTI_EXP.lock().unwrap();
+        let mut total_duration = TOTAL_DURATION_MULTI_EXP_CPU.lock().unwrap();
         *total_duration += start_time.elapsed();
         res
     } else {
         let mut acc = C::Curve::identity();
         multiexp_serial(coeffs, bases, &mut acc);
-        let mut total_duration = TOTAL_DURATION_MULTI_EXP.lock().unwrap();
+        let mut total_duration = TOTAL_DURATION_MULTI_EXP_CPU.lock().unwrap();
         *total_duration += start_time.elapsed();
         acc
     }
