@@ -88,8 +88,8 @@ fn c_from_icicle_point<C: CurveAffine>(point: &G1Projective) -> C::Curve {
         let mut affine: Affine<CurveCfg> = Affine::<CurveCfg>::from(*point);
 
         (
-            repr_from_u32::<C>(&point.x.into()),
-            repr_from_u32::<C>(&point.y.into()),
+            repr_from_u32::<C>(&affine.x.into()),
+            repr_from_u32::<C>(&affine.y.into()),
         )
     };
 
