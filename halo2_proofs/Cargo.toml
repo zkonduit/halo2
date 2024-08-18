@@ -52,7 +52,7 @@ log = { version = "0.4.17", default_features = false }
 backtrace = { version = "0.3", optional = true }
 ff = "0.13"
 group = "0.13"
-halo2curves = { git = "https://github.com/privacy-scaling-explorations/halo2curves", rev="9fff22c", default-features = false }
+halo2curves = { git = "https://github.com/privacy-scaling-explorations/halo2curves", rev="b753a832e92d5c86c5c997327a9cf9de86a18851", default-features = false }
 rand_core = { version = "0.6", default-features = false }
 tracing = "0.1"
 blake2b_simd = "1" # MSRV 1.66.0
