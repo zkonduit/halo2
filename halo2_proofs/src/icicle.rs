@@ -15,16 +15,11 @@ use icicle_cuda_runtime::memory::HostOrDeviceSlice;
 use icicle_cuda_runtime::stream::CudaStream;
 use std::{env, mem};
 
-type Abc = Field<8, ScalarCfg>;
+type ScalarField = Field<8, ScalarCfg>;
 
 pub fn should_use_cpu_msm(size: usize) -> bool {
     size <= (1
         << u8::from_str_radix(&env::var("ICICLE_SMALL_K").unwrap_or("8".to_string()), 10).unwrap())
-}
-
-fn is_infinity_point(point: &G1Projective) -> bool {
-    let inf_point = G1Projective::zero();
-    inf_point.z.eq(&point.z)
 }
 
 fn u32_from_u8(u8_arr: &[u8; 32]) -> [u32; 8] {
@@ -40,13 +35,24 @@ fn u32_from_u8(u8_arr: &[u8; 32]) -> [u32; 8] {
     return t;
 }
 
-fn icicle_scalars_from_c<C: CurveAffine>(coeffs: &[C::Scalar]) -> Vec<Abc> {
+fn repr_from_u32<C: CurveAffine>(u32_arr: &[u32; 8]) -> <C as CurveAffine>::Base {
+    let t: &[<<C as CurveAffine>::Base as PrimeField>::Repr] =
+        unsafe { mem::transmute(&u32_arr[..]) };
+    return PrimeField::from_repr(t[0]).unwrap();
+}
+
+fn is_infinity_point(point: &G1Projective) -> bool {
+    let inf_point = G1Projective::zero();
+    inf_point.z.eq(&point.z)
+}
+
+fn icicle_scalars_from_c<C: CurveAffine>(coeffs: &[C::Scalar]) -> Vec<ScalarField> {
     let _coeffs = [Arc::new(
         coeffs.iter().map(|x| x.to_repr()).collect::<Vec<_>>(),
     )];
 
     let _coeffs: &Arc<Vec<[u32; 8]>> = unsafe { mem::transmute(&_coeffs) };
-    _coeffs.iter().map(|x| Abc::from(*x)).collect::<Vec<_>>()
+    _coeffs.iter().map(|x| ScalarField::from(*x)).collect::<Vec<_>>()
 }
 
 fn icicle_points_from_c<C: CurveAffine>(bases: &[C]) -> Vec<Affine<CurveCfg>> {
@@ -70,12 +76,6 @@ fn icicle_points_from_c<C: CurveAffine>(bases: &[C]) -> Vec<Affine<CurveCfg>> {
             Affine::<CurveCfg>::from_limbs(tx, ty)
         })
         .collect::<Vec<_>>()
-}
-
-fn repr_from_u32<C: CurveAffine>(u32_arr: &[u32; 8]) -> <C as CurveAffine>::Base {
-    let t: &[<<C as CurveAffine>::Base as PrimeField>::Repr] =
-        unsafe { mem::transmute(&u32_arr[..]) };
-    return PrimeField::from_repr(t[0]).unwrap();
 }
 
 fn c_from_icicle_point<C: CurveAffine>(point: &G1Projective) -> C::Curve {
