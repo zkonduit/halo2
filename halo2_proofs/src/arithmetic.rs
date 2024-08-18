@@ -9,7 +9,7 @@ use group::{
 };
 pub use halo2curves::{CurveAffine, CurveExt};
 #[cfg(feature = "icicle_gpu")]
-use super::icicle_helper;
+use super::icicle;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use lazy_static;
@@ -165,7 +165,7 @@ pub fn small_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::C
 pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], g: &[C]) -> C::Curve {
     let start_time: Instant = Instant::now();
 
-    let res = icicle_helper::multiexp_on_device::<C>(coeffs, g);
+    let res = icicle::multiexp_on_device::<C>(coeffs, g);
     let mut total_duration = TOTAL_DURATION_MULTI_EXP_GPU.lock().unwrap();
     *total_duration += start_time.elapsed();
     
@@ -178,7 +178,7 @@ pub fn best_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Cu
     println!("msm result: {:?}", res);
 
     #[cfg(feature = "icicle_gpu")]
-    if !icicle_helper::should_use_cpu_msm(bases.len())
+    if !icicle::should_use_cpu_msm(bases.len())
     {
         let res = best_multiexp_gpu(coeffs, bases);
         println!("msm result: {:?}", res);
