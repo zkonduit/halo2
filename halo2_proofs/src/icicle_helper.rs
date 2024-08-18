@@ -46,10 +46,7 @@ fn icicle_scalars_from_c<C: CurveAffine>(coeffs: &[C::Scalar]) -> Vec<Abc> {
     )];
 
     let _coeffs: &Arc<Vec<[u32; 8]>> = unsafe { mem::transmute(&_coeffs) };
-    _coeffs.iter().map(|x| {
-        Abc::from(*x)
-    }
-    ).collect::<Vec<_>>()
+    _coeffs.iter().map(|x| Abc::from(*x)).collect::<Vec<_>>()
 }
 
 fn icicle_points_from_c<C: CurveAffine>(bases: &[C]) -> Vec<Affine<CurveCfg>> {
@@ -71,7 +68,6 @@ fn icicle_points_from_c<C: CurveAffine>(bases: &[C]) -> Vec<Affine<CurveCfg>> {
             let ty = u32_from_u8(&x[1]);
 
             Affine::<CurveCfg>::from_limbs(tx, ty)
-
         })
         .collect::<Vec<_>>()
 }
@@ -83,54 +79,50 @@ fn repr_from_u32<C: CurveAffine>(u32_arr: &[u32; 8]) -> <C as CurveAffine>::Base
 }
 
 fn c_from_icicle_point<C: CurveAffine>(point: &G1Projective) -> C::Curve {
-    if is_infinity_point(point) {
-        let affine_result = C::from_xy(
+    let (x, y) = if is_infinity_point(point) {
+        (
             repr_from_u32::<C>(&[0u32; 8]),
             repr_from_u32::<C>(&[0u32; 8]),
-        );
-
-        affine_result.unwrap().to_curve()
+        )
     } else {
-        let mut point_aff = Affine::<CurveCfg>::from(*point);
+        let mut affine: Affine<CurveCfg> = Affine::<CurveCfg>::from(*point);
 
-        let x_limbs: [u32; 8] = point_aff.x.into();
-        let y_limbs: [u32; 8] = point_aff.y.into();
+        (
+            repr_from_u32::<C>(&point.x.into()),
+            repr_from_u32::<C>(&point.y.into()),
+        )
+    };
 
-        let x_limbs = repr_from_u32::<C>(&x_limbs);
-        let y_limbs = repr_from_u32::<C>(&y_limbs);
+    // TODO: Point is not on the curve
+    let affine = C::from_xy(x, y);
 
-        let affine_result = C::from_xy(
-            x_limbs, 
-            y_limbs 
-        );
-
-        affine_result.unwrap().to_curve()
-    }
+    return affine.unwrap().to_curve();
 }
 
-pub fn multiexp_on_device<C: CurveAffine>(mut coeffs: &[C::Scalar], g: &[C]) -> C::Curve {
+pub fn multiexp_on_device<C: CurveAffine>(mut coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
+    let binding = icicle_scalars_from_c::<C>(coeffs);
+    let coeffs = HostSlice::from_slice(&binding[..]);
+    let binding = icicle_points_from_c(bases);
+    let bases = HostSlice::from_slice(&binding[..]);
+
+    let mut i = 0;
+    // check all c points can be converted to icicle point
+    while i < bases.len() {
+        let converted_icicle_point = c_from_icicle_point::<C>(&bases[i].to_projective());
+        i = i + 1;
+    }
+
+    let mut msm_results = DeviceVec::<G1Projective>::cuda_malloc(1).unwrap();
     let mut cfg = msm::MSMConfig::default();
     let stream = CudaStream::create().unwrap();
     cfg.ctx.stream = &stream;
     cfg.is_async = true;
+    cfg.large_bucket_factor = 10;
     cfg.c = 16;
-    cfg.are_scalars_montgomery_form = false;
-    let binding = icicle_scalars_from_c::<C>(coeffs);
-    let coeffs = HostSlice::from_slice(&binding[..]);
-    let binding = icicle_points_from_c(g);
-    let g = HostSlice::from_slice(&binding[..]);
-
-    let mut msm_results = DeviceVec::<G1Projective>::cuda_malloc(1).unwrap();
-    // println!("coeffs gpu: {:?}", coeffs);
-    // println!("bases gpu: {:?}", g);
-
-    msm::msm(coeffs, g, &cfg, &mut msm_results[..]).unwrap();
+    msm::msm(coeffs, bases, &cfg, &mut msm_results[..]).unwrap();
+    stream.synchronize().unwrap();
 
     let mut msm_host_result = vec![G1Projective::zero(); 1];
-    stream
-        .synchronize()
-        .unwrap();
-
     msm_results
         .copy_to_host(HostSlice::from_mut_slice(&mut msm_host_result[..]))
         .unwrap();
