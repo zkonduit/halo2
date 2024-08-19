@@ -22,7 +22,6 @@ use crate::{
 
 use maybe_rayon::prelude::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
-    ParallelSliceMut,
 };
 
 pub mod metadata;

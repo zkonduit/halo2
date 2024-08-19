@@ -13,6 +13,32 @@ use icicle_core::{
     msm,
     ntt::{get_root_of_unity, initialize_domain, ntt, FieldImpl, NTTConfig, NTTDir},
 };
+use std::time::{Duration, Instant};
+use lazy_static::lazy_static;
+use std::sync::Mutex;
+use maybe_rayon::iter::IntoParallelRefIterator;
+use maybe_rayon::iter::ParallelIterator;
+
+lazy_static! {
+    /// a
+    pub static ref TOTAL_DURATION_NTT: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    /// b
+    pub static ref TOTAL_DURATION_INITIALIZATION: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    /// c
+    pub static ref TOTAL_DURATION_EXECUTION: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    /// d
+    pub static ref TOTAL_DURATION_COPY_TO_HOST: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    /// e
+    pub static ref TOTAL_DURATION_CONVERT_TO_ORIGINAL: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    /// f
+    pub static ref TOTAL_DURATION_CONVERT_TO_ICICLE: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    /// f
+    pub static ref TOTAL_DURATION_CONVERT_TO_ORIGINAL_1: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    /// g
+    pub static ref TOTAL_DURATION_CONVERT_TO_ORIGINAL_2: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    /// h
+    pub static ref TOTAL_DURATION_CONVERT_TO_ORIGINAL_3: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+}
 use std::{env, mem};
 
 pub fn should_use_cpu_msm(size: usize) -> bool {
@@ -20,11 +46,12 @@ pub fn should_use_cpu_msm(size: usize) -> bool {
         << u8::from_str_radix(&env::var("ICICLE_SMALL_K").unwrap_or("8".to_string()), 10).unwrap())
 }
 
-pub fn should_use_cpu_fft(size: u32) -> bool {
-    size as u8 <= (u8::from_str_radix(&env::var("ICICLE_SMALL_K_FFT").unwrap_or("5".to_string()), 10).unwrap())
+pub fn should_use_cpu_fft(size: usize) -> bool {
+    size <= (1
+        << u8::from_str_radix(&env::var("ICICLE_SMALL_K_FFT").unwrap_or("8".to_string()), 10).unwrap())
 }
 
-pub fn is_gpu_supported_field<G: Any>(sample_element: &G) -> bool {
+pub fn is_gpu_supported_field<G: Any>(_sample_element: &G) -> bool {
     match TypeId::of::<G>() {
         id if id == TypeId::of::<Bn256Fr>() => true,
         _ => false,
@@ -67,26 +94,31 @@ fn icicle_scalars_from_c<C: CurveAffine>(coeffs: &[C::Scalar]) -> Vec<ScalarFiel
 }
 
 fn icicle_scalars_from_c_scalars<G: PrimeField>(coeffs: &[G]) -> Vec<ScalarField> {
-    let _coeffs = [Arc::new(
-        coeffs.iter().map(|x| x.to_repr()).collect::<Vec<_>>(),
-    )];
+    let start_time = Instant::now();
 
-    let _coeffs: &Arc<Vec<[u32; 8]>> = unsafe { mem::transmute(&_coeffs) };
-    _coeffs
-        .iter()
-        .map(|x| ScalarField::from(*x))
-        .collect::<Vec<_>>()
+    let results: Vec<ScalarField> =  coeffs.par_iter().map(|coef| {
+        let repr: [u32; 8] = unsafe { mem::transmute_copy(&coef.to_repr()) };
+        ScalarField::from(repr)
+    }).collect();
+
+    let duration = start_time.elapsed();
+    *TOTAL_DURATION_CONVERT_TO_ICICLE.lock().unwrap() += duration;
+
+    results
 }
 
 fn c_scalars_from_icicle_scalars<G: PrimeField>(scalars: &[ScalarField]) -> Vec<G> {
-    scalars
-        .iter()
-        .map(|x| {
-            let mut repr = G::Repr::default();
-            repr.as_mut().copy_from_slice(&x.to_bytes_le()[..]);
-            G::from_repr(repr).unwrap()
-        })
-        .collect()
+    let start_time = Instant::now();
+
+    let results: Vec<G> = scalars.par_iter().map(|scalar| {
+        let repr: G::Repr = unsafe { mem::transmute_copy(scalar) };
+        G::from_repr(repr).unwrap()
+    }).collect();
+
+    let duration = start_time.elapsed();
+    *TOTAL_DURATION_CONVERT_TO_ORIGINAL.lock().unwrap() += duration;
+
+    results
 }
 
 fn icicle_points_from_c<C: CurveAffine>(bases: &[C]) -> Vec<Affine<CurveCfg>> {
@@ -153,23 +185,31 @@ pub fn multiexp_on_device<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> 
     msm_point
 }
 
-pub fn ntt_on_device<Scalar: ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeField>(scalars: &mut [G], omega: Scalar, log_n: u32, inverse: bool) {
+pub fn ntt_on_device<Scalar: ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeField>(
+    scalars: &mut [G], 
+    _omega: Scalar, 
+    log_n: u32, 
+    inverse: bool
+) {
     let size: usize = 1 << log_n;
 
+    // Measure initialization time
+    let start_initialization = Instant::now();
     let mut cfg = NTTConfig::<'_, ScalarField>::default();
-    let stream = CudaStream::create().unwrap();
-    cfg.ctx.stream = &stream;
-    cfg.is_async = true;
-    
+    cfg.is_async = false;
+
     let icicle_omega = get_root_of_unity::<ScalarField>((size as u64) * 10);
-    // let icicle_omega = icicle_scalars_from_c_scalars(&[omega])[0];
     initialize_domain(icicle_omega, &cfg.ctx, true).unwrap();
 
     let mut ntt_results = DeviceVec::<ScalarField>::cuda_malloc(size).unwrap();
-    let mut icicle_scalars: Vec<ScalarField> = icicle_scalars_from_c_scalars(scalars);
-
+    let icicle_scalars: Vec<ScalarField> = icicle_scalars_from_c_scalars(scalars);
     let host_scalars = HostSlice::from_slice(&icicle_scalars);
-    
+
+    let duration_initialization = start_initialization.elapsed();
+    *TOTAL_DURATION_INITIALIZATION.lock().unwrap() += duration_initialization;
+
+    // Measure execution time
+    let start_execution = Instant::now();
     ntt::<ScalarField, ScalarField>(
         host_scalars,
         if inverse { NTTDir::kInverse } else { NTTDir::kForward },
@@ -177,13 +217,26 @@ pub fn ntt_on_device<Scalar: ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeFiel
         &mut ntt_results[..],
     ).unwrap();
 
-    stream.synchronize().unwrap();
+    let duration_execution = start_execution.elapsed();
+    *TOTAL_DURATION_EXECUTION.lock().unwrap() += duration_execution;
 
+    // Measure time to copy results to host
+    let start_copy_to_host = Instant::now();
     let mut ntt_host_result = vec![ScalarField::zero(); size];
     ntt_results
         .copy_to_host(HostSlice::from_mut_slice(&mut ntt_host_result[..]))
         .unwrap();
+    let duration_copy_to_host = start_copy_to_host.elapsed();
+    *TOTAL_DURATION_COPY_TO_HOST.lock().unwrap() += duration_copy_to_host;
 
-    let mut c_scalars = &c_scalars_from_icicle_scalars::<G>(&mut ntt_host_result)[..];
+    let start_convert_to_original = Instant::now();
+    // Convert back to original scalar type
+    let c_scalars = &c_scalars_from_icicle_scalars::<G>(&mut ntt_host_result)[..];
     scalars.copy_from_slice(&c_scalars);
+    let duration_convert_to_original = start_convert_to_original.elapsed();
+    *TOTAL_DURATION_CONVERT_TO_ORIGINAL.lock().unwrap() += duration_convert_to_original;
+
+    // Measure total time for the NTT operation
+    let duration_ntt = start_initialization.elapsed();
+    *TOTAL_DURATION_NTT.lock().unwrap() += duration_ntt;
 }

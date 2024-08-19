@@ -202,7 +202,7 @@ pub fn best_ntt<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeF
 
     #[cfg(feature = "icicle_gpu")]
     {
-        if icicle::should_use_cpu_fft(log_n as u32) && icicle::is_gpu_supported_field(&scalars[0]) {
+        if !icicle::should_use_cpu_fft(scalars.len()) && icicle::is_gpu_supported_field(&scalars[0]) {
             best_fft_gpu(scalars, omega, log_n, false);
         } else {
             best_fft(scalars, omega, log_n);
@@ -219,7 +219,7 @@ pub fn best_intt<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::Prime
 ) {
     #[cfg(feature = "icicle_gpu")]
     {
-        if icicle::should_use_cpu_fft(log_n as u32) && icicle::is_gpu_supported_field(&scalars[0]) {
+        if !icicle::should_use_cpu_fft(scalars.len()) && icicle::is_gpu_supported_field(&scalars[0]) {
             best_fft_gpu(scalars, omega, log_n, true);
         } else {
             best_fft(scalars, omega, log_n);

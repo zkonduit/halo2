@@ -2,7 +2,7 @@
 //! domain that is of a suitable size for the application.
 
 use crate::{
-    arithmetic::{best_fft, best_intt, best_ntt, parallelize},
+    arithmetic::{best_intt, best_ntt, parallelize},
     plonk::Assigned,
 };
 
