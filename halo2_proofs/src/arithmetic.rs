@@ -16,7 +16,9 @@ use lazy_static;
 
 lazy_static::lazy_static! {
     /// a
-    pub static ref TOTAL_DURATION_FFT: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    pub static ref TOTAL_DURATION_FFT_CPU: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    /// b
+    pub static ref TOTAL_DURATION_FFT_GPU: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
     /// a
     pub static ref TOTAL_FFT: Mutex<u64> = Mutex::new(0);
     /// b
@@ -174,18 +176,40 @@ pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], g: &[C]) -> C::Cu
 
 /// Performs a multi-exponentiation operation
 pub fn best_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
-    let res = best_multiexp_cpu(coeffs, bases);
-    println!("msm result: {:?}", res);
+    #[cfg(not(feature = "icicle_gpu"))]
+    {
+        let res: <C as CurveAffine>::CurveExt = best_multiexp_cpu(coeffs, bases);
+        return res;
+    }
 
     #[cfg(feature = "icicle_gpu")]
     if !icicle::should_use_cpu_msm(bases.len())
     {
         let res = best_multiexp_gpu(coeffs, bases);
-        println!("msm result: {:?}", res);
+        return res;
     }
-
-    res
+    else {
+        let res: <C as CurveAffine>::CurveExt = best_multiexp_cpu(coeffs, bases);
+        return res;
+    }
 }
+
+// 
+// pub fn best_ntt<Scalar: Field, G: FftGroup<Scalar>>(scalars: &mut [G], omega: Scalar, log_n: u32) {
+//     #[cfg(not(feature = "icicle_gpu"))]
+//     {
+//         best_fft_gpu(scalars, omega, log_n);
+//     }
+
+//     #[cfg(feature = "icicle_gpu")]
+//     if !icicle::should_use_cpu_fft(log_n)
+//     {
+//         best_fft(scalars, omega, log_n);
+//     }
+//     else {
+//         best_fft_gpu(scalars, omega, log_n);
+//     }
+// }
 
 /// Performs a multi-exponentiation operation.
 ///
@@ -231,6 +255,22 @@ pub fn best_multiexp_cpu<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C
     }
 }
 
+/// a
+pub fn best_fft_gpu<Scalar: Field, G: FftGroup<Scalar> + PrimeField>(a: &mut [G], omega: Scalar, log_n: u32) {
+    let start_time: Instant = Instant::now();
+    icicle::ntt_on_device::<Scalar, G>(a, omega, log_n, false);
+    let mut total_duration: std::sync::MutexGuard<Duration> = TOTAL_DURATION_FFT_GPU.lock().unwrap();
+    let mut total_count = TOTAL_FFT.lock().unwrap();
+    *total_count += 1;
+
+    *total_duration += start_time.elapsed();
+
+}
+
+/// b
+pub fn best_ifft_gpu<Scalar: Field, G: FftGroup<Scalar> + PrimeField>(a: &mut [G], omega: Scalar, log_n: u32) {
+    icicle::ntt_on_device::<Scalar, G>(a, omega, log_n, true);
+}
 /// Performs a radix-$2$ Fast-Fourier Transformation (FFT) on a vector of size
 /// $n = 2^k$, when provided `log_n` = $k$ and an element of multiplicative
 /// order $n$ called `omega` ($\omega$). The result is that the vector `a`, when
@@ -242,9 +282,9 @@ pub fn best_multiexp_cpu<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C
 ///
 /// This will use multithreading if beneficial.
 pub fn best_fft<Scalar: Field, G: FftGroup<Scalar>>(a: &mut [G], omega: Scalar, log_n: u32) {
-    let start_time = Instant::now();
+    let start_time: Instant = Instant::now();
     fn bitreverse(mut n: usize, l: usize) -> usize {
-        let mut r = 0;
+        let mut r = 0;  
         for _ in 0..l {
             r = (r << 1) | (n & 1);
             n >>= 1;
@@ -304,7 +344,7 @@ pub fn best_fft<Scalar: Field, G: FftGroup<Scalar>>(a: &mut [G], omega: Scalar, 
     } else {
         let res = recursive_butterfly_arithmetic(a, n, 1, &twiddles);
 
-        let mut total_duration = TOTAL_DURATION_FFT.lock().unwrap();
+        let mut total_duration = TOTAL_DURATION_FFT_CPU.lock().unwrap();
         let mut total_count = TOTAL_FFT.lock().unwrap();
         *total_count += 1;
 

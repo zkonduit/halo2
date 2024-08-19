@@ -22,7 +22,7 @@ use super::lookup;
 use super::mv_lookup as lookup;
 
 use crate::{
-    arithmetic::{eval_polynomial, CurveAffine, TOTAL_DURATION_EVAL_POLY, TOTAL_FFT, TOTAL_DURATION_MULTI_EXP_GPU, TOTAL_DURATION_MULTI_EXP_CPU, TOTAL_DURATION_FFT, TOTAL_DURATION_INNER_PRODUCT, TOTAL_DURATION_PARALLELIZE},
+    arithmetic::{eval_polynomial, CurveAffine, TOTAL_DURATION_EVAL_POLY, TOTAL_FFT, TOTAL_DURATION_MULTI_EXP_GPU, TOTAL_DURATION_MULTI_EXP_CPU, TOTAL_DURATION_FFT_CPU, TOTAL_DURATION_FFT_GPU, TOTAL_DURATION_INNER_PRODUCT, TOTAL_DURATION_PARALLELIZE},
     circuit::Value,
     plonk::Assigned,
     poly::{
@@ -827,7 +827,8 @@ where
         .create_proof(rng, transcript, instances)
         .map_err(|_| Error::ConstraintSystemFailure);
 
-    println!("TOTAL_DURATION_FFT: {:?}", TOTAL_DURATION_FFT.lock().unwrap());
+    println!("TOTAL_DURATION_FFT_CPU: {:?}", TOTAL_DURATION_FFT_CPU.lock().unwrap());
+    println!("TOTAL_DURATION_FFT_GPU: {:?}", TOTAL_DURATION_FFT_GPU.lock().unwrap());
     println!("TOTAL_FFT: {:?}", TOTAL_FFT.lock().unwrap());
     println!("TOTAL_DURATION_INNER_PRODUCT: {:?}", TOTAL_DURATION_INNER_PRODUCT.lock().unwrap());
     println!("TOTAL_DURATION_EVAL_POLY: {:?}", TOTAL_DURATION_EVAL_POLY.lock().unwrap());

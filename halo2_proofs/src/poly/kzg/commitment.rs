@@ -1,9 +1,4 @@
 use crate::arithmetic::{best_multiexp, g_to_lagrange, parallelize};
-
-#[cfg(feature = "icicle_gpu")]
-use crate::arithmetic::best_multiexp_gpu;
-#[cfg(feature = "icicle_gpu")]
-use crate::icicle;
 #[cfg(feature = "icicle_gpu")]
 use std::env;
 
