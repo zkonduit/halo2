@@ -400,7 +400,7 @@ impl<C: CurveAffine> Evaluator<C> {
             .map(|advice_polys| {
                 advice_polys
                     .par_iter()
-                    .map(|poly| domain.coeff_to_extended(poly.clone()))
+                    .map(|poly| domain.coeff_to_extended(&poly))
                     .collect()
             })
             .collect();
@@ -412,7 +412,7 @@ impl<C: CurveAffine> Evaluator<C> {
             .map(|instance_polys| {
                 instance_polys
                     .par_iter()
-                    .map(|poly| domain.coeff_to_extended(poly.clone()))
+                    .map(|poly| domain.coeff_to_extended(&poly))
                     .collect()
             })
             .collect();
@@ -551,8 +551,10 @@ impl<C: CurveAffine> Evaluator<C> {
             // The outer vector has capacity self.lookups.len()
             // The middle vector has capacity domain.extended_len()
             // The inner vector has capacity
+            log::trace!("num lookups: {}", lookups.len());
+
             #[cfg(feature = "mv-lookup")]
-            let mut inputs_inv_sum_cosets: Vec<_> = lookups
+            let inputs_inv_sum_cosets: Vec<_> = lookups
                 .par_iter()
                 .enumerate()
                 .map(|(n, lookup)| {
@@ -603,8 +605,8 @@ impl<C: CurveAffine> Evaluator<C> {
 
                     (
                         inputs_inv_sums,
-                        domain.coeff_to_extended(lookup.phi_poly.clone()),
-                        domain.coeff_to_extended(lookup.m_poly.clone()),
+                        domain.coeff_to_extended(&lookup.phi_poly),
+                        domain.coeff_to_extended(&lookup.m_poly),
                     )
                 })
                 .collect();
@@ -829,7 +831,7 @@ impl<C: CurveAffine> Evaluator<C> {
             // Shuffle constraints
             let start = std::time::Instant::now();
             for (n, shuffle) in shuffles.iter().enumerate() {
-                let product_coset = pk.vk.domain.coeff_to_extended(shuffle.product_poly.clone());
+                let product_coset = pk.vk.domain.coeff_to_extended(&shuffle.product_poly);
 
                 // Shuffle constraints
                 parallelize(&mut values, |values, start| {
