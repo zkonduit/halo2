@@ -3,7 +3,7 @@ use rand_core::RngCore;
 
 use super::ParamsIPA;
 use crate::arithmetic::{
-    best_multiexp_cpu, compute_inner_product, eval_polynomial, parallelize, CurveAffine,
+    best_multiexp, compute_inner_product, eval_polynomial, parallelize, CurveAffine,
 };
 
 use crate::poly::commitment::ParamsProver;
@@ -106,16 +106,16 @@ pub fn create_proof<
         //
         // TODO: If we modify multiexp to take "extra" bases, we could speed
         // this piece up a bit by combining the multiexps.
-        let l_j = best_multiexp_cpu(&p_prime[half..], &g_prime[0..half]);
-        let r_j = best_multiexp_cpu(&p_prime[0..half], &g_prime[half..]);
+        let l_j = best_multiexp(&p_prime[half..], &g_prime[0..half]);
+        let r_j = best_multiexp(&p_prime[0..half], &g_prime[half..]);
         let value_l_j = compute_inner_product(&p_prime[half..], &b[0..half]);
         let value_r_j = compute_inner_product(&p_prime[0..half], &b[half..]);
         let l_j_randomness = C::Scalar::random(&mut rng);
         let r_j_randomness = C::Scalar::random(&mut rng);
         let l_j =
-            l_j + &best_multiexp_cpu(&[value_l_j * &z, l_j_randomness], &[params.u, params.w]);
+            l_j + &best_multiexp(&[value_l_j * &z, l_j_randomness], &[params.u, params.w]);
         let r_j =
-            r_j + &best_multiexp_cpu(&[value_r_j * &z, r_j_randomness], &[params.u, params.w]);
+            r_j + &best_multiexp(&[value_r_j * &z, r_j_randomness], &[params.u, params.w]);
         let l_j = l_j.to_affine();
         let r_j = r_j.to_affine();
 

@@ -1,6 +1,4 @@
 use crate::arithmetic::{best_multiexp, g_to_lagrange, parallelize};
-#[cfg(feature = "icicle_gpu")]
-use std::env;
 
 use crate::helpers::SerdeCurveAffine;
 use crate::poly::commitment::{Blind, CommitmentScheme, Params, ParamsProver, ParamsVerifier};

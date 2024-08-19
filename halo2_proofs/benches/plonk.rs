@@ -1,6 +1,11 @@
 #[macro_use]
 extern crate criterion;
 
+use halo2_proofs::arithmetic::{
+    CurveAffine, TOTAL_DURATION_EVAL_POLY, TOTAL_DURATION_FFT_CPU,
+    TOTAL_DURATION_FFT_GPU, TOTAL_DURATION_INNER_PRODUCT, TOTAL_DURATION_MULTI_EXP_CPU,
+    TOTAL_DURATION_MULTI_EXP_GPU, TOTAL_DURATION_PARALLELIZE, TOTAL_FFT,
+};
 use group::ff::Field;
 use halo2_proofs::circuit::{Cell, Layouter, SimpleFloorPlanner, Value};
 use halo2_proofs::plonk::*;
@@ -300,7 +305,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         assert!(verify_proof(params, vk, strategy, &[&[]], &mut transcript, params.n(),).is_ok(),);
     }
 
-    let k_range = 8..=16;
+    let k_range = 14..=14;
 
     let mut keygen_group = c.benchmark_group("plonk-keygen");
     keygen_group.sample_size(10);
@@ -327,6 +332,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     prover_group.finish();
 
     let mut verifier_group = c.benchmark_group("plonk-verifier");
+    verifier_group.sample_size(10);
     for k in k_range {
         let (params, pk) = keygen(k);
         let proof = prover(k, &params, &pk);
@@ -340,6 +346,15 @@ fn criterion_benchmark(c: &mut Criterion) {
         );
     }
     verifier_group.finish();
+
+    println!("TOTAL_DURATION_FFT_CPU: {:?}", TOTAL_DURATION_FFT_CPU.lock().unwrap());
+    println!("TOTAL_DURATION_FFT_GPU: {:?}", TOTAL_DURATION_FFT_GPU.lock().unwrap());
+    println!("TOTAL_FFT: {:?}", TOTAL_FFT.lock().unwrap());
+    println!("TOTAL_DURATION_INNER_PRODUCT: {:?}", TOTAL_DURATION_INNER_PRODUCT.lock().unwrap());
+    println!("TOTAL_DURATION_EVAL_POLY: {:?}", TOTAL_DURATION_EVAL_POLY.lock().unwrap());
+    println!("TOTAL_DURATION_PARALLELIZE: {:?}", TOTAL_DURATION_PARALLELIZE.lock().unwrap());
+    println!("TOTAL_DURATION_MULTI_EXP_GPU: {:?}", TOTAL_DURATION_MULTI_EXP_GPU.lock().unwrap());
+    println!("TOTAL_DURATION_MULTI_EXP_CPU: {:?}", TOTAL_DURATION_MULTI_EXP_CPU.lock().unwrap());
 }
 
 criterion_group!(benches, criterion_benchmark);

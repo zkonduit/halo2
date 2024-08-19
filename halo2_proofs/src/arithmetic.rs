@@ -1,6 +1,8 @@
 //! This module provides common utilities, traits and structures for group,
 //! field and polynomial arithmetic.
 
+#[cfg(feature = "icicle_gpu")]
+use super::icicle;
 use super::multicore;
 pub use ff::Field;
 use group::{
@@ -8,11 +10,9 @@ use group::{
     Curve, Group, GroupOpsOwned, ScalarMulOwned,
 };
 pub use halo2curves::{CurveAffine, CurveExt};
-#[cfg(feature = "icicle_gpu")]
-use super::icicle;
+use lazy_static;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use lazy_static;
 
 lazy_static::lazy_static! {
     /// a
@@ -170,7 +170,7 @@ pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], g: &[C]) -> C::Cu
     let res = icicle::multiexp_on_device::<C>(coeffs, g);
     let mut total_duration = TOTAL_DURATION_MULTI_EXP_GPU.lock().unwrap();
     *total_duration += start_time.elapsed();
-    
+
     res
 }
 
@@ -178,38 +178,68 @@ pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], g: &[C]) -> C::Cu
 pub fn best_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
     #[cfg(not(feature = "icicle_gpu"))]
     {
-        let res: <C as CurveAffine>::CurveExt = best_multiexp_cpu(coeffs, bases);
-        return res;
+        best_multiexp_cpu(coeffs, bases)
     }
 
     #[cfg(feature = "icicle_gpu")]
-    if !icicle::should_use_cpu_msm(bases.len())
-    {
-        let res = best_multiexp_gpu(coeffs, bases);
-        return res;
-    }
-    else {
-        let res: <C as CurveAffine>::CurveExt = best_multiexp_cpu(coeffs, bases);
-        return res;
+    if !icicle::should_use_cpu_msm(bases.len()) && icicle::is_gpu_supported_field(&coeffs[0]) {
+        best_multiexp_gpu(coeffs, bases)
+    } else {
+        best_multiexp_cpu(coeffs, bases)
     }
 }
 
-// 
-// pub fn best_ntt<Scalar: Field, G: FftGroup<Scalar>>(scalars: &mut [G], omega: Scalar, log_n: u32) {
-//     #[cfg(not(feature = "icicle_gpu"))]
-//     {
-//         best_fft_gpu(scalars, omega, log_n);
-//     }
+/// a
+pub fn best_ntt<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeField>(
+    scalars: &mut [G],
+    omega: Scalar,
+    log_n: u32,
+) {
+    #[cfg(not(feature = "icicle_gpu"))]
+    {
+        best_fft(scalars, omega, log_n);
+    }
 
-//     #[cfg(feature = "icicle_gpu")]
-//     if !icicle::should_use_cpu_fft(log_n)
-//     {
-//         best_fft(scalars, omega, log_n);
-//     }
-//     else {
-//         best_fft_gpu(scalars, omega, log_n);
-//     }
-// }
+    #[cfg(feature = "icicle_gpu")]
+    {
+        if icicle::should_use_cpu_fft(log_n as u32) && icicle::is_gpu_supported_field(&scalars[0]) {
+            best_fft_gpu(scalars, omega, log_n, false);
+        } else {
+            best_fft(scalars, omega, log_n);
+        }
+    }
+}
+
+/// b
+pub fn best_intt<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeField>(
+    scalars: &mut [G],
+    omega: Scalar,
+    log_n: u32,
+    divisor: Scalar,
+) {
+    #[cfg(feature = "icicle_gpu")]
+    {
+        if icicle::should_use_cpu_fft(log_n as u32) && icicle::is_gpu_supported_field(&scalars[0]) {
+            best_fft_gpu(scalars, omega, log_n, true);
+        } else {
+            best_fft(scalars, omega, log_n);
+            parallelize(scalars, |a, _| {
+                for a in a {
+                    *a *= &divisor;
+                }
+            });
+        }
+    }
+    #[cfg(not(feature = "icicle_gpu"))]
+    {
+        best_fft(scalars, omega, log_n);
+        parallelize(scalars, |a, _| {
+            for a in a {
+                *a *= &divisor;
+            }
+        });
+    }
+}
 
 /// Performs a multi-exponentiation operation.
 ///
@@ -219,9 +249,6 @@ pub fn best_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Cu
 pub fn best_multiexp_cpu<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
     let start_time: Instant = Instant::now();
     assert_eq!(coeffs.len(), bases.len());
-
-    // println!("coeffs cpu: {:?}", coeffs);
-    // println!("bases cpu: {:?}", bases);
 
     let num_threads = multicore::current_num_threads();
     if coeffs.len() > num_threads {
@@ -256,21 +283,23 @@ pub fn best_multiexp_cpu<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C
 }
 
 /// a
-pub fn best_fft_gpu<Scalar: Field, G: FftGroup<Scalar> + PrimeField>(a: &mut [G], omega: Scalar, log_n: u32) {
+#[cfg(feature = "icicle_gpu")]
+pub fn best_fft_gpu<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeField>(
+    a: &mut [G],
+    omega: Scalar,
+    log_n: u32,
+    inverse: bool,
+) {
     let start_time: Instant = Instant::now();
-    icicle::ntt_on_device::<Scalar, G>(a, omega, log_n, false);
-    let mut total_duration: std::sync::MutexGuard<Duration> = TOTAL_DURATION_FFT_GPU.lock().unwrap();
+    icicle::ntt_on_device::<Scalar, G>(a, omega, log_n, inverse);
+    let mut total_duration: std::sync::MutexGuard<Duration> =
+        TOTAL_DURATION_FFT_GPU.lock().unwrap();
     let mut total_count = TOTAL_FFT.lock().unwrap();
     *total_count += 1;
 
     *total_duration += start_time.elapsed();
-
 }
 
-/// b
-pub fn best_ifft_gpu<Scalar: Field, G: FftGroup<Scalar> + PrimeField>(a: &mut [G], omega: Scalar, log_n: u32) {
-    icicle::ntt_on_device::<Scalar, G>(a, omega, log_n, true);
-}
 /// Performs a radix-$2$ Fast-Fourier Transformation (FFT) on a vector of size
 /// $n = 2^k$, when provided `log_n` = $k$ and an element of multiplicative
 /// order $n$ called `omega` ($\omega$). The result is that the vector `a`, when
@@ -284,7 +313,7 @@ pub fn best_ifft_gpu<Scalar: Field, G: FftGroup<Scalar> + PrimeField>(a: &mut [G
 pub fn best_fft<Scalar: Field, G: FftGroup<Scalar>>(a: &mut [G], omega: Scalar, log_n: u32) {
     let start_time: Instant = Instant::now();
     fn bitreverse(mut n: usize, l: usize) -> usize {
-        let mut r = 0;  
+        let mut r = 0;
         for _ in 0..l {
             r = (r << 1) | (n & 1);
             n >>= 1;
@@ -351,8 +380,6 @@ pub fn best_fft<Scalar: Field, G: FftGroup<Scalar>>(a: &mut [G], omega: Scalar, 
         *total_duration += start_time.elapsed();
         res
     }
-
-    
 }
 
 /// This perform recursive butterfly arithmetic
@@ -462,7 +489,7 @@ pub fn eval_polynomial<F: Field>(poly: &[F], point: F) -> F {
 pub fn compute_inner_product<F: Field>(a: &[F], b: &[F]) -> F {
     // TODO: parallelize?
     let start_time = Instant::now();
-    
+
     assert_eq!(a.len(), b.len());
 
     let mut acc = F::ZERO;

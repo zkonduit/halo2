@@ -119,30 +119,24 @@ where
                     Ok(poly)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            println!("Common Scalar: {:?}", start.elapsed());
+            // println!("Common Scalar: {:?}", start.elapsed());
             if P::QUERY_INSTANCE {
-                let mut start = Instant::now();
                 let instance_commitments_projective: Vec<_> = instance_values
                     .iter()
                     .map(|poly| params.commit_lagrange(poly, Blind::default()))
                     .collect();
-                println!("Commit Lagrange: {:?}", start.elapsed());
-                start = Instant::now();
                 let mut instance_commitments =
                     vec![Scheme::Curve::identity(); instance_commitments_projective.len()];
                 <Scheme::Curve as CurveAffine>::CurveExt::batch_normalize(
                     &instance_commitments_projective,
                     &mut instance_commitments,
                 );
-                println!("Batch Normalize: {:?}", start.elapsed());
-                start = Instant::now();
                 let instance_commitments = instance_commitments;
                 drop(instance_commitments_projective);
 
                 for commitment in &instance_commitments {
                     transcript.common_point(*commitment)?;
                 }
-                println!("Common Point: {:?}", start.elapsed());
             }
 
             let start: Instant = Instant::now();
@@ -153,14 +147,14 @@ where
                     domain.lagrange_to_coeff(lagrange_vec)
                 })
                 .collect();
-            println!("IFFT: {:?}", start.elapsed());
+            // println!("IFFT: {:?}", start.elapsed());
             Ok(InstanceSingle {
                 instance_values,
                 instance_polys,
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    println!("Instance: {:?}", start.elapsed());
+    // println!("Instance: {:?}", start.elapsed());
     #[derive(Clone)]
     struct AdviceSingle<C: CurveAffine, B: Basis> {
         pub advice_polys: Vec<Polynomial<C::Scalar, B>>,
@@ -446,13 +440,13 @@ where
         (advice, challenges)
     };
 
-    println!("Advice: {:?}", start.elapsed());
+    // println!("Advice: {:?}", start.elapsed());
 
     let start: Instant = Instant::now();
 
     // Sample theta challenge for keeping lookup columns linearly independent
     let theta: ChallengeTheta<_> = transcript.squeeze_challenge_scalar();
-    println!("Squeeze Challange Scalar: {:?}", start.elapsed());
+    // println!("Squeeze Challange Scalar: {:?}", start.elapsed());
 
     let start: Instant = Instant::now();
 
@@ -483,7 +477,7 @@ where
                 .collect()
         })
         .collect::<Result<Vec<_>, _>>()?;
-    println!("MV Lookup: {:?}", start.elapsed());
+    // println!("MV Lookup: {:?}", start.elapsed());
 
     #[cfg(not(feature = "mv-lookup"))]
     let lookups: Vec<Vec<lookup::prover::Permuted<Scheme::Curve>>> = instance
@@ -516,11 +510,11 @@ where
     // Sample beta challenge
     let start: Instant = Instant::now();
     let beta: ChallengeBeta<_> = transcript.squeeze_challenge_scalar();
-    println!("Beta Challange Scalar: {:?}", start.elapsed());
+    // println!("Beta Challange Scalar: {:?}", start.elapsed());
     // Sample gamma challenge
     let start: Instant = Instant::now();
     let gamma: ChallengeGamma<_> = transcript.squeeze_challenge_scalar();
-    println!("Gamma Challange Scalar: {:?}", start.elapsed());    
+    // println!("Gamma Challange Scalar: {:?}", start.elapsed());    
 
 
     // Commit to permutations.
@@ -543,7 +537,7 @@ where
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    println!("Commit to Permutations: {:?}", start.elapsed());    
+    // println!("Commit to Permutations: {:?}", start.elapsed());    
 
     let start: Instant = Instant::now();
     #[cfg(feature = "mv-lookup")]
@@ -557,7 +551,7 @@ where
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
-    println!("Mv Lookup 2: {:?}", start.elapsed());    
+    // println!("Mv Lookup 2: {:?}", start.elapsed());    
 
     #[cfg(not(feature = "mv-lookup"))]
     let lookups: Vec<Vec<lookup::prover::Committed<Scheme::Curve>>> = lookups
@@ -599,17 +593,17 @@ where
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
-    println!("Shuffle Commit Product 2: {:?}", start.elapsed());    
+    // println!("Shuffle Commit Product 2: {:?}", start.elapsed());    
 
     // Commit to the vanishing argument's random polynomial for blinding h(x_3)
     let start: Instant = Instant::now();
     let vanishing = vanishing::Argument::commit(params, domain, &mut rng, transcript)?;
-    println!("Commit Vanishing: {:?}", start.elapsed());    
+    // println!("Commit Vanishing: {:?}", start.elapsed());    
 
     // Obtain challenge for keeping all separate gates linearly independent
     let start: Instant = Instant::now();
     let y: ChallengeY<_> = transcript.squeeze_challenge_scalar();
-    println!("Squeeze Y Scalar: {:?}", start.elapsed());
+    // println!("Squeeze Y Scalar: {:?}", start.elapsed());
     // Calculate the advice polys
     let start: Instant = Instant::now();
     let advice: Vec<AdviceSingle<Scheme::Curve, Coeff>> = advice
@@ -629,7 +623,7 @@ where
             },
         )
         .collect();
-    println!("Calculate Advice Polys: {:?}", start.elapsed());
+    // println!("Calculate Advice Polys: {:?}", start.elapsed());
     // Evaluate the h(X) polynomial
     let start: Instant = Instant::now();
     let h_poly = pk.ev.evaluate_h(
@@ -651,11 +645,11 @@ where
         &shuffles,
         &permutations,
     );
-    println!("H Poly: {:?}", start.elapsed());
+    // println!("H Poly: {:?}", start.elapsed());
     // Construct the vanishing argument's h(X) commitments
     let start: Instant = Instant::now();
     let vanishing = vanishing.construct(params, domain, h_poly, &mut rng, transcript)?;
-    println!("Construct the vanishing argument: {:?}", start.elapsed());
+    // println!("Construct the vanishing argument: {:?}", start.elapsed());
     let x: ChallengeX<_> = transcript.squeeze_challenge_scalar();
     let xn = x.pow([params.n()]);
 
@@ -701,7 +695,7 @@ where
             transcript.write_scalar(*eval)?;
         }
     }
-    println!("Compute and hash advice: {:?}", start.elapsed());
+    // println!("Compute and hash advice: {:?}", start.elapsed());
     // Compute and hash fixed evals (shared across all circuit instances)
     let start: Instant = Instant::now();
     let fixed_evals: Vec<_> = meta
@@ -711,13 +705,13 @@ where
             eval_polynomial(&pk.fixed_polys[column.index()], domain.rotate_omega(*x, at))
         })
         .collect();
-    println!("Compute and hash fixed evals: {:?}", start.elapsed());
+    // println!("Compute and hash fixed evals: {:?}", start.elapsed());
     // Hash each fixed column evaluation
     let start: Instant = Instant::now();
     for eval in fixed_evals.iter() {
         transcript.write_scalar(*eval)?;
     }
-    println!("Hash each fixed column evaluation: {:?}", start.elapsed());
+    // println!("Hash each fixed column evaluation: {:?}", start.elapsed());
 
     let vanishing = vanishing.evaluate(x, xn, domain, transcript)?;
 
@@ -730,7 +724,7 @@ where
         .into_iter()
         .map(|permutation| -> Result<_, _> { permutation.construct().evaluate(pk, x, transcript) })
         .collect::<Result<Vec<_>, _>>()?;
-    println!("Evaluate the permutations: {:?}", start.elapsed());
+    // println!("Evaluate the permutations: {:?}", start.elapsed());
 
     let start: Instant = Instant::now();
     // Evaluate the lookups, if any, at omega^i x.
@@ -743,7 +737,7 @@ where
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
-    println!("Evaluate the lookups: {:?}", start.elapsed());
+    // println!("Evaluate the lookups: {:?}", start.elapsed());
 
     let start: Instant = Instant::now();
     // Evaluate the shuffles, if any, at omega^i x.
@@ -756,7 +750,7 @@ where
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
-    println!("Evaluate the shuffles: {:?}", start.elapsed());
+    // println!("Evaluate the shuffles: {:?}", start.elapsed());
 
     let start: Instant = Instant::now();
     let instances = instance
@@ -808,7 +802,7 @@ where
         .chain(pk.permutation.open(x))
         // We query the h(X) polynomial at x
         .chain(vanishing.open(x));
-    println!("Instances aaaa: {:?}", start.elapsed());
+    // println!("Instances aaaa: {:?}", start.elapsed());
 
     #[cfg(feature = "counter")]
     {
