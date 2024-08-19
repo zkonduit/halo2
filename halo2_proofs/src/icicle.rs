@@ -39,6 +39,15 @@ lazy_static! {
     /// h
     pub static ref TOTAL_DURATION_CONVERT_TO_ORIGINAL_3: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
 }
+
+lazy_static! {
+    pub static ref TOTAL_DURATION_MULTIEXP_CONVERT_TO_ICICLE: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    pub static ref TOTAL_DURATION_MULTIEXP_INITIALIZATION: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    pub static ref TOTAL_DURATION_MULTIEXP_EXECUTION: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    pub static ref TOTAL_DURATION_MULTIEXP_COPY_TO_HOST: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+    pub static ref TOTAL_DURATION_MULTIEXP_CONVERT_TO_ORIGINAL: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
+}
+
 use std::{env, mem};
 
 pub fn should_use_cpu_msm(size: usize) -> bool {
@@ -59,16 +68,7 @@ pub fn is_gpu_supported_field<G: Any>(_sample_element: &G) -> bool {
 }
 
 fn u32_from_u8(u8_arr: &[u8; 32]) -> [u32; 8] {
-    let mut t = [0u32; 8];
-    for i in 0..8 {
-        t[i] = u32::from_le_bytes([
-            u8_arr[4 * i],
-            u8_arr[4 * i + 1],
-            u8_arr[4 * i + 2],
-            u8_arr[4 * i + 3],
-        ]);
-    }
-    return t;
+    unsafe { mem::transmute(*u8_arr) }
 }
 
 fn repr_from_u32<C: CurveAffine>(u32_arr: &[u32; 8]) -> <C as CurveAffine>::Base {
@@ -82,15 +82,12 @@ fn is_infinity_point(point: &G1Projective) -> bool {
 }
 
 fn icicle_scalars_from_c<C: CurveAffine>(coeffs: &[C::Scalar]) -> Vec<ScalarField> {
-    let _coeffs = [Arc::new(
-        coeffs.iter().map(|x| x.to_repr()).collect::<Vec<_>>(),
-    )];
+    let results: Vec<ScalarField> = coeffs.par_iter().map(|coef| {
+        let repr: [u32; 8] = unsafe { mem::transmute_copy(&coef.to_repr()) };
+        ScalarField::from(repr)
+    }).collect();
 
-    let _coeffs: &Arc<Vec<[u32; 8]>> = unsafe { mem::transmute(&_coeffs) };
-    _coeffs
-        .iter()
-        .map(|x| ScalarField::from(*x))
-        .collect::<Vec<_>>()
+    results
 }
 
 fn icicle_scalars_from_c_scalars<G: PrimeField>(coeffs: &[G]) -> Vec<ScalarField> {
@@ -122,26 +119,16 @@ fn c_scalars_from_icicle_scalars<G: PrimeField>(scalars: &[ScalarField]) -> Vec<
 }
 
 fn icicle_points_from_c<C: CurveAffine>(bases: &[C]) -> Vec<Affine<CurveCfg>> {
-    let _bases = [Arc::new(
-        bases
-            .iter()
-            .map(|p| {
-                let coordinates = p.coordinates().unwrap();
-                [coordinates.x().to_repr(), coordinates.y().to_repr()]
-            })
-            .collect::<Vec<_>>(),
-    )];
+    // Convert base points to their byte representation in parallel
+    let results: Vec<Affine<CurveCfg>> = bases.par_iter().map(|p| {
+        let coordinates = p.coordinates().unwrap();
+        let x_repr: [u32; 8] = unsafe { mem::transmute_copy(&coordinates.x().to_repr()) };
+        let y_repr: [u32; 8] = unsafe { mem::transmute_copy(&coordinates.y().to_repr()) };
 
-    let _bases: &Arc<Vec<[[u8; 32]; 2]>> = unsafe { mem::transmute(&_bases) };
-    _bases
-        .iter()
-        .map(|x| {
-            let tx = u32_from_u8(&x[0]);
-            let ty = u32_from_u8(&x[1]);
+        Affine::<CurveCfg>::from_limbs(x_repr, y_repr)
+    }).collect();
 
-            Affine::<CurveCfg>::from_limbs(tx, ty)
-        })
-        .collect::<Vec<_>>()
+    results
 }
 
 fn c_from_icicle_point<C: CurveAffine>(point: &G1Projective) -> C::Curve {
@@ -160,11 +147,17 @@ fn c_from_icicle_point<C: CurveAffine>(point: &G1Projective) -> C::Curve {
 }
 
 pub fn multiexp_on_device<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
+    // Measure the time taken to convert coefficients and bases to ICICLE format
+    let start = Instant::now();
     let binding = icicle_scalars_from_c::<C>(coeffs);
     let coeffs = HostSlice::from_slice(&binding[..]);
     let binding = icicle_points_from_c(bases);
     let bases = HostSlice::from_slice(&binding[..]);
+    let duration = start.elapsed();
+    *TOTAL_DURATION_MULTIEXP_CONVERT_TO_ICICLE.lock().unwrap() += duration;
 
+    // Measure the time taken to initialize MSM on device
+    let start = Instant::now();
     let mut msm_results = DeviceVec::<G1Projective>::cuda_malloc(1).unwrap();
     let mut cfg = msm::MSMConfig::default();
     let stream = CudaStream::create().unwrap();
@@ -172,19 +165,33 @@ pub fn multiexp_on_device<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> 
     cfg.is_async = true;
     cfg.large_bucket_factor = 10;
     cfg.c = 16;
+    let duration = start.elapsed();
+    *TOTAL_DURATION_MULTIEXP_INITIALIZATION.lock().unwrap() += duration;
+
+    // Measure the time taken to execute MSM
+    let start = Instant::now();
     msm::msm(coeffs, bases, &cfg, &mut msm_results[..]).unwrap();
     stream.synchronize().unwrap();
+    let duration = start.elapsed();
+    *TOTAL_DURATION_MULTIEXP_EXECUTION.lock().unwrap() += duration;
 
+    // Measure the time taken to copy the results to host
+    let start = Instant::now();
     let mut msm_host_result = vec![G1Projective::zero(); 1];
     msm_results
         .copy_to_host(HostSlice::from_mut_slice(&mut msm_host_result[..]))
         .unwrap();
+    let duration = start.elapsed();
+    *TOTAL_DURATION_MULTIEXP_COPY_TO_HOST.lock().unwrap() += duration;
 
+    // Measure the time taken to convert the result back to the original format
+    let start = Instant::now();
     let msm_point = c_from_icicle_point::<C>(&msm_host_result[0]);
+    let duration = start.elapsed();
+    *TOTAL_DURATION_MULTIEXP_CONVERT_TO_ORIGINAL.lock().unwrap() += duration;
 
     msm_point
 }
-
 pub fn ntt_on_device<Scalar: ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeField>(
     scalars: &mut [G], 
     _omega: Scalar, 
@@ -193,7 +200,6 @@ pub fn ntt_on_device<Scalar: ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeFiel
 ) {
     let size: usize = 1 << log_n;
 
-    // Measure initialization time
     let start_initialization = Instant::now();
     let mut cfg = NTTConfig::<'_, ScalarField>::default();
     cfg.is_async = false;
@@ -208,7 +214,6 @@ pub fn ntt_on_device<Scalar: ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeFiel
     let duration_initialization = start_initialization.elapsed();
     *TOTAL_DURATION_INITIALIZATION.lock().unwrap() += duration_initialization;
 
-    // Measure execution time
     let start_execution = Instant::now();
     ntt::<ScalarField, ScalarField>(
         host_scalars,
