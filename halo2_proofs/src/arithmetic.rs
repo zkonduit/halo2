@@ -23,14 +23,8 @@ lazy_static::lazy_static! {
     pub static ref TOTAL_FFT: Mutex<u64> = Mutex::new(0);
     /// b
     pub static ref TOTAL_DURATION_PARALLELIZE: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
-    /// c
-    pub static ref TOTAL_DURATION_INNER_PRODUCT: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
     /// d
     pub static ref TOTAL_DURATION_EVAL_POLY: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
-    /// e
-    pub static ref TOTAL_DURATION_MULTI_EXP_CPU: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
-    /// f
-    pub static ref TOTAL_DURATION_MULTI_EXP_GPU: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
 }
 
 /// This represents an element of a group with basic operations that can be
@@ -165,13 +159,7 @@ pub fn small_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::C
 #[cfg(feature = "icicle_gpu")]
 /// Performs a multi-exponentiation operation on GPU using Icicle library
 pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], g: &[C]) -> C::Curve {
-    let start_time: Instant = Instant::now();
-
-    let res = icicle::multiexp_on_device::<C>(coeffs, g);
-    let mut total_duration = TOTAL_DURATION_MULTI_EXP_GPU.lock().unwrap();
-    *total_duration += start_time.elapsed();
-
-    res
+    icicle::multiexp_on_device::<C>(coeffs, g)
 }
 
 /// Performs a multi-exponentiation operation
@@ -247,7 +235,6 @@ pub fn best_intt<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::Prime
 ///
 /// This will use multithreading if beneficial.
 pub fn best_multiexp_cpu<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
-    let start_time: Instant = Instant::now();
     assert_eq!(coeffs.len(), bases.len());
 
     let num_threads = multicore::current_num_threads();
@@ -268,16 +255,11 @@ pub fn best_multiexp_cpu<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C
                 });
             }
         });
-        let res = results.iter().fold(C::Curve::identity(), |a, b| a + b);
-
-        let mut total_duration = TOTAL_DURATION_MULTI_EXP_CPU.lock().unwrap();
-        *total_duration += start_time.elapsed();
-        res
+        results.iter().fold(C::Curve::identity(), |a, b| a + b)
     } else {
         let mut acc = C::Curve::identity();
         multiexp_serial(coeffs, bases, &mut acc);
-        let mut total_duration = TOTAL_DURATION_MULTI_EXP_CPU.lock().unwrap();
-        *total_duration += start_time.elapsed();
+
         acc
     }
 }
@@ -488,8 +470,6 @@ pub fn eval_polynomial<F: Field>(poly: &[F], point: F) -> F {
 /// This function will panic if the two vectors are not the same size.
 pub fn compute_inner_product<F: Field>(a: &[F], b: &[F]) -> F {
     // TODO: parallelize?
-    let start_time = Instant::now();
-
     assert_eq!(a.len(), b.len());
 
     let mut acc = F::ZERO;
@@ -497,8 +477,6 @@ pub fn compute_inner_product<F: Field>(a: &[F], b: &[F]) -> F {
         acc += (*a) * (*b);
     }
 
-    let mut total_duration = TOTAL_DURATION_INNER_PRODUCT.lock().unwrap();
-    *total_duration += start_time.elapsed();
     acc
 }
 

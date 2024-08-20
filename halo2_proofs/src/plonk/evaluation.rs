@@ -13,6 +13,8 @@ use crate::{
     arithmetic::{parallelize, CurveAffine},
     poly::{Coeff, ExtendedLagrangeCoeff, Polynomial, Rotation},
 };
+use std::time::{Instant};
+
 
 use group::ff::{Field, PrimeField, WithSmallOrderMulGroup};
 
@@ -447,6 +449,7 @@ impl<C: CurveAffine> Evaluator<C> {
                 }
             });
 
+
             // Permutations
             let sets = &permutation.sets;
             if !sets.is_empty() {
@@ -831,6 +834,7 @@ impl<C: CurveAffine> Evaluator<C> {
                     }
                 });
             }
+
         }
         values
     }

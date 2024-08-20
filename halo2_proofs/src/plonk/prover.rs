@@ -4,7 +4,6 @@ use rand_core::RngCore;
 use std::collections::{BTreeSet, HashSet};
 use std::ops::RangeTo;
 use std::{collections::HashMap, iter};
-
 use super::{
     circuit::{
         sealed::{self},
@@ -20,10 +19,10 @@ use super::lookup;
 #[cfg(feature = "mv-lookup")]
 use super::mv_lookup as lookup;
 #[cfg(feature = "icicle_gpu")]
-use crate::icicle::{TOTAL_DURATION_MULTIEXP_CONVERT_TO_ICICLE, TOTAL_DURATION_MULTIEXP_INITIALIZATION, TOTAL_DURATION_MULTIEXP_EXECUTION, TOTAL_DURATION_MULTIEXP_COPY_TO_HOST, TOTAL_DURATION_MULTIEXP_CONVERT_TO_ORIGINAL, TOTAL_DURATION_COPY_TO_HOST, TOTAL_DURATION_INITIALIZATION, TOTAL_DURATION_CONVERT_TO_ORIGINAL_1, TOTAL_DURATION_CONVERT_TO_ICICLE, TOTAL_DURATION_CONVERT_TO_ORIGINAL_2, TOTAL_DURATION_CONVERT_TO_ORIGINAL_3, TOTAL_DURATION_EXECUTION, TOTAL_DURATION_NTT, TOTAL_DURATION_CONVERT_TO_ORIGINAL};
+use crate::icicle::{TOTAL_DURATION_MULTIEXP_CONVERT_TO_ICICLE, TOTAL_DURATION_MULTIEXP_INITIALIZATION, TOTAL_DURATION_MULTIEXP_EXECUTION, TOTAL_DURATION_MULTIEXP_COPY_TO_HOST, TOTAL_DURATION_MULTIEXP_CONVERT_TO_ORIGINAL, TOTAL_DURATION_INITIALIZATION, TOTAL_DURATION_CONVERT_TO_ICICLE, TOTAL_DURATION_EXECUTION, TOTAL_DURATION_NTT, TOTAL_DURATION_CONVERT_TO_ORIGINAL};
 
 use crate::{
-    arithmetic::{eval_polynomial, CurveAffine, TOTAL_DURATION_EVAL_POLY, TOTAL_FFT, TOTAL_DURATION_MULTI_EXP_GPU, TOTAL_DURATION_MULTI_EXP_CPU, TOTAL_DURATION_FFT_CPU, TOTAL_DURATION_FFT_GPU, TOTAL_DURATION_INNER_PRODUCT, TOTAL_DURATION_PARALLELIZE},
+    arithmetic::{eval_polynomial, CurveAffine, TOTAL_DURATION_EVAL_POLY, TOTAL_FFT, TOTAL_DURATION_FFT_CPU, TOTAL_DURATION_FFT_GPU, TOTAL_DURATION_PARALLELIZE},
     circuit::Value,
     plonk::Assigned,
     poly::{
@@ -325,7 +324,6 @@ where
                     }
                 })
                 .collect::<BTreeSet<_>>();
-
             for ((circuit, advice), instances) in
                 circuits.iter().zip(advice.iter_mut()).zip(instances)
             {
@@ -366,7 +364,6 @@ where
                         })
                         .collect(),
                 );
-
                 // Add blinding factors to advice columns
                 for (column_index, advice_values) in column_indices.iter().zip(&mut advice_values) {
                     if !witness.unblinded_advice.contains(column_index) {
@@ -379,7 +376,6 @@ where
                         }
                     }
                 }
-
                 // Compute commitments to advice column polynomials
                 let blinds: Vec<_> = column_indices
                     .iter()
@@ -415,7 +411,6 @@ where
                     advice.advice_blinds[*column_index] = blind;
                 }
             }
-
             for (index, phase) in meta.challenge_phase.iter().enumerate() {
                 if current_phase == *phase {
                     let existing =
@@ -433,9 +428,9 @@ where
         (advice, challenges)
     };
 
+
     // Sample theta challenge for keeping lookup columns linearly independent
     let theta: ChallengeTheta<_> = transcript.squeeze_challenge_scalar();
-
     #[cfg(feature = "mv-lookup")]
     let lookups: Vec<Vec<lookup::prover::Prepared<Scheme::Curve>>> = instance
         .iter()
@@ -518,7 +513,7 @@ where
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-        #[cfg(feature = "mv-lookup")]
+    #[cfg(feature = "mv-lookup")]
     let lookups: Vec<Vec<lookup::prover::Committed<Scheme::Curve>>> = lookups
         .into_iter()
         .map(|lookups| -> Result<Vec<_>, _> {
@@ -569,7 +564,6 @@ where
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
-
     // Commit to the vanishing argument's random polynomial for blinding h(x_3)
     let vanishing = vanishing::Argument::commit(params, domain, &mut rng, transcript)?;
 
@@ -704,7 +698,7 @@ where
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
-    // println!("Evaluate the shuffles: {:?}", start.elapsed());
+
 
     let instances = instance
         .iter()
@@ -773,25 +767,19 @@ where
         .create_proof(rng, transcript, instances)
         .map_err(|_| Error::ConstraintSystemFailure);
 
+
     println!("TOTAL_DURATION_FFT_CPU: {:?}", TOTAL_DURATION_FFT_CPU.lock().unwrap());
     println!("TOTAL_DURATION_FFT_GPU: {:?}", TOTAL_DURATION_FFT_GPU.lock().unwrap());
     println!("TOTAL_FFT: {:?}", TOTAL_FFT.lock().unwrap());
-    println!("TOTAL_DURATION_INNER_PRODUCT: {:?}", TOTAL_DURATION_INNER_PRODUCT.lock().unwrap());
     println!("TOTAL_DURATION_EVAL_POLY: {:?}", TOTAL_DURATION_EVAL_POLY.lock().unwrap());
     println!("TOTAL_DURATION_PARALLELIZE: {:?}", TOTAL_DURATION_PARALLELIZE.lock().unwrap());
-    println!("TOTAL_DURATION_MULTI_EXP_GPU: {:?}", TOTAL_DURATION_MULTI_EXP_GPU.lock().unwrap());
-    println!("TOTAL_DURATION_MULTI_EXP_CPU: {:?}", TOTAL_DURATION_MULTI_EXP_CPU.lock().unwrap());
     #[cfg(feature = "icicle_gpu")]
     {
         println!("TOTAL_DURATION_EXECUTION: {:?}", TOTAL_DURATION_EXECUTION.lock().unwrap());
         println!("TOTAL_DURATION_NTT: {:?}", TOTAL_DURATION_NTT.lock().unwrap());
         println!("TOTAL_DURATION_INITIALIZATION: {:?}", TOTAL_DURATION_INITIALIZATION.lock().unwrap());
-        println!("TOTAL_DURATION_COPY_TO_HOST: {:?}", TOTAL_DURATION_COPY_TO_HOST.lock().unwrap());
         println!("TOTAL_DURATION_CONVERT_TO_ORIGINAL: {:?}", TOTAL_DURATION_CONVERT_TO_ORIGINAL.lock().unwrap());
         println!("TOTAL_DURATION_CONVERT_TO_ICICLE: {:?}", TOTAL_DURATION_CONVERT_TO_ICICLE.lock().unwrap());
-        println!("TOTAL_DURATION_CONVERT_TO_ORIGINAL_1: {:?}", TOTAL_DURATION_CONVERT_TO_ORIGINAL_1.lock().unwrap());
-        println!("TOTAL_DURATION_CONVERT_TO_ORIGINAL_2: {:?}", TOTAL_DURATION_CONVERT_TO_ORIGINAL_2.lock().unwrap());
-        println!("TOTAL_DURATION_CONVERT_TO_ORIGINAL_3: {:?}", TOTAL_DURATION_CONVERT_TO_ORIGINAL_3.lock().unwrap());
     }
 
     #[cfg(feature = "icicle_gpu")]
