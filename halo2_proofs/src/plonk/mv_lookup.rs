@@ -58,7 +58,7 @@ impl<F: Field> Argument<F> {
         let inputs_expressions_degree: usize = self
             .inputs_expressions
             .iter()
-            .map(|input_expressions| expr_degree(input_expressions))
+            .map(expr_degree)
             .sum();
 
         let mut table_degree = 0;

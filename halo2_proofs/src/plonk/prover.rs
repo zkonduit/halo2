@@ -21,8 +21,6 @@ use super::{
     ChallengeY, Error, ProvingKey,
 };
 use maybe_rayon::iter::IndexedParallelIterator;
-use maybe_rayon::iter::IntoParallelIterator;
-use maybe_rayon::iter::IntoParallelRefIterator;
 use maybe_rayon::iter::ParallelIterator;
 
 #[cfg(not(feature = "mv-lookup"))]
@@ -328,7 +326,7 @@ where
             };
             instances.len()
         ];
-        let s = FxBuildHasher::default();
+        let s = FxBuildHasher;
         let mut challenges =
             HashMap::<usize, Scheme::Scalar>::with_capacity_and_hasher(meta.num_challenges, s);
 
@@ -790,7 +788,7 @@ where
         .map(|lookups| -> Result<Vec<_>, _> {
             lookups
                 .into_iter()
-                .map(|p| p.evaluate(&pk.vk, x, transcript))
+                .map(|p| p.evaluate(pk, x, transcript))
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;

@@ -17,7 +17,6 @@ use crate::{
 use group::ff::{Field, PrimeField, WithSmallOrderMulGroup};
 use maybe_rayon::iter::IndexedParallelIterator;
 use maybe_rayon::iter::IntoParallelRefIterator;
-use maybe_rayon::iter::IntoParallelRefMutIterator;
 use maybe_rayon::iter::ParallelIterator;
 
 use super::{shuffle, ConstraintSystem, Expression};
@@ -400,7 +399,7 @@ impl<C: CurveAffine> Evaluator<C> {
             .map(|advice_polys| {
                 advice_polys
                     .par_iter()
-                    .map(|poly| domain.coeff_to_extended(&poly))
+                    .map(|poly| domain.coeff_to_extended(poly))
                     .collect()
             })
             .collect();
@@ -412,7 +411,7 @@ impl<C: CurveAffine> Evaluator<C> {
             .map(|instance_polys| {
                 instance_polys
                     .par_iter()
-                    .map(|poly| domain.coeff_to_extended(&poly))
+                    .map(|poly| domain.coeff_to_extended(poly))
                     .collect()
             })
             .collect();
@@ -754,15 +753,11 @@ impl<C: CurveAffine> Evaluator<C> {
 
                 #[cfg(not(feature = "precompute-coset"))]
                 let (product_coset, permuted_input_coset, permuted_table_coset) = {
-                    let product_coset = pk.vk.domain.coeff_to_extended(lookup.product_poly.clone());
-                    let permuted_input_coset = pk
-                        .vk
-                        .domain
-                        .coeff_to_extended(lookup.permuted_input_poly.clone());
-                    let permuted_table_coset = pk
-                        .vk
-                        .domain
-                        .coeff_to_extended(lookup.permuted_table_poly.clone());
+                    let product_coset = pk.vk.domain.coeff_to_extended(&lookup.product_poly);
+                    let permuted_input_coset =
+                        pk.vk.domain.coeff_to_extended(&lookup.permuted_input_poly);
+                    let permuted_table_coset =
+                        pk.vk.domain.coeff_to_extended(&lookup.permuted_table_poly);
                     (product_coset, permuted_input_coset, permuted_table_coset)
                 };
 

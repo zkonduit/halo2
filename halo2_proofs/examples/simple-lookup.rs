@@ -267,7 +267,7 @@ fn main() {
 
     println!("reloading proving key 💾");
 
-    let f = std::fs::File::open(path.clone()).unwrap();
+    let f = std::fs::File::open(path).unwrap();
     let mut reader = std::io::BufReader::new(f);
     #[cfg(feature = "circuit-params")]
     let pk = ProvingKey::<G1Affine>::read::<_, MyCircuit<Fr>>(
@@ -297,7 +297,7 @@ fn main() {
 
     println!("reloading verifier key 💾");
 
-    let f = std::fs::File::open(path.clone()).unwrap();
+    let f = std::fs::File::open(path).unwrap();
     let mut reader = std::io::BufReader::new(f);
     #[cfg(feature = "circuit-params")]
     let vk = VerifyingKey::<G1Affine>::read::<_, MyCircuit<Fr>>(

@@ -20,7 +20,6 @@ use group::{
 };
 use rustc_hash::FxHashMap as HashMap;
 
-use rand_core::RngCore;
 
 use std::{
     iter,
