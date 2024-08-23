@@ -28,6 +28,11 @@ use super::lookup;
 #[cfg(feature = "mv-lookup")]
 use super::mv_lookup as lookup;
 
+#[cfg(feature = "mv-lookup")]
+use maybe_rayon::iter::{
+    IntoParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
+};
+
 use crate::{
     arithmetic::{eval_polynomial, CurveAffine},
     circuit::Value,
@@ -782,13 +787,21 @@ where
     log::trace!("Permutation evaluation: {:?}", start.elapsed());
 
     // Evaluate the lookups, if any, at omega^i x.
+
     let start = Instant::now();
+
     let lookups: Vec<Vec<lookup::prover::Evaluated<Scheme::Curve>>> = lookups
         .into_iter()
         .map(|lookups| -> Result<Vec<_>, _> {
             lookups
                 .into_iter()
-                .map(|p| p.evaluate(pk, x, transcript))
+                .map(|p| {
+                    #[cfg(not(feature = "mv-lookup"))]
+                    let res = { p.evaluate(pk, x, transcript) };
+                    #[cfg(feature = "mv-lookup")]
+                    let res = { p.evaluate(&pk.vk, x, transcript) };
+                    res
+                })
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;

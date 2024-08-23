@@ -24,6 +24,9 @@ use super::{shuffle, ConstraintSystem, Expression};
 #[cfg(feature = "mv-lookup")]
 use ff::BatchInvert;
 
+#[cfg(feature = "mv-lookup")]
+use maybe_rayon::iter::IntoParallelRefMutIterator;
+
 /// Return the index in the polynomial of size `isize` after rotation `rot`.
 fn get_rotation_idx(idx: usize, rot: i32, rot_scale: i32, isize: i32) -> usize {
     (((idx as i32) + (rot * rot_scale)).rem_euclid(isize)) as usize
