@@ -228,7 +228,8 @@ impl<C: CurveAffine> VerifyingKey<C> {
             + self.permutation.bytes_length(format)
             + self.selectors.len()
                 * (self
-                    .selectors.first()
+                    .selectors
+                    .first()
                     .map(|selector| (selector.len() + 7) / 8)
                     .unwrap_or(0))
     }

@@ -20,7 +20,6 @@ use group::{
 };
 use rustc_hash::FxHashMap as HashMap;
 
-
 use std::{
     iter,
     ops::{Mul, MulAssign},
