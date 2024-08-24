@@ -381,7 +381,7 @@ impl<C: CurveAffine> Evaluator<C> {
         shuffles: &[Vec<shuffle::prover::Committed<C>>],
         permutations: &[permutation::prover::Committed<C>],
     ) -> Polynomial<C::ScalarExt, ExtendedLagrangeCoeff> {
-        let start = std::time::Instant::now();
+        let start = instant::Instant::now();
         let domain = &pk.vk.domain;
         let size = domain.extended_len();
         let rot_scale = 1 << (domain.extended_k() - domain.k());
@@ -395,7 +395,7 @@ impl<C: CurveAffine> Evaluator<C> {
         let p = &pk.vk.cs.permutation;
         log::trace!(" - Initialization: {:?}", start.elapsed());
 
-        let start = std::time::Instant::now();
+        let start = instant::Instant::now();
         // Calculate the advice and instance cosets
         let advice: Vec<Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>>> = advice_polys
             .iter()
@@ -408,7 +408,7 @@ impl<C: CurveAffine> Evaluator<C> {
             .collect();
         log::trace!(" - Advice cosets: {:?}", start.elapsed());
 
-        let start = std::time::Instant::now();
+        let start = instant::Instant::now();
         let instance: Vec<Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>>> = instance_polys
             .iter()
             .map(|instance_polys| {
@@ -424,7 +424,7 @@ impl<C: CurveAffine> Evaluator<C> {
 
         // Core expression evaluations
 
-        let start = std::time::Instant::now();
+        let start = instant::Instant::now();
         let num_threads = multicore::current_num_threads();
         for ((((advice, instance), lookups), shuffles), permutation) in advice
             .iter()
@@ -465,7 +465,7 @@ impl<C: CurveAffine> Evaluator<C> {
             log::trace!(" - Custom gates: {:?}", start.elapsed());
 
             // Permutations
-            let start = std::time::Instant::now();
+            let start = instant::Instant::now();
             let sets = &permutation.sets;
             if !sets.is_empty() {
                 let blinding_factors = pk.vk.cs.blinding_factors();
@@ -548,7 +548,7 @@ impl<C: CurveAffine> Evaluator<C> {
             }
             log::trace!(" - Permutations: {:?}", start.elapsed());
 
-            let start = std::time::Instant::now();
+            let start = instant::Instant::now();
             // For lookups, compute inputs_inv_sum = ∑ 1 / (f_i(X) + α)
             // The outer vector has capacity self.lookups.len()
             // The middle vector has capacity domain.extended_len()
@@ -616,7 +616,7 @@ impl<C: CurveAffine> Evaluator<C> {
             log::trace!(" - Lookups inv sum: {:?}", start.elapsed());
 
             #[cfg(feature = "mv-lookup")]
-            let start = std::time::Instant::now();
+            let start = instant::Instant::now();
             // Lookups
             #[cfg(feature = "mv-lookup")]
             parallelize(&mut values, |values, start| {
@@ -764,7 +764,6 @@ impl<C: CurveAffine> Evaluator<C> {
                     (product_coset, permuted_input_coset, permuted_table_coset)
                 };
 
-                let start = std::time::Instant::now();
                 // Lookup constraints
                 parallelize(&mut values, |values, start| {
                     let lookup_evaluator = &self.lookups[n];
@@ -827,7 +826,7 @@ impl<C: CurveAffine> Evaluator<C> {
             log::trace!(" - Lookups constraints: {:?}", start.elapsed());
 
             // Shuffle constraints
-            let start = std::time::Instant::now();
+            let start = instant::Instant::now();
             for (n, shuffle) in shuffles.iter().enumerate() {
                 let product_coset = pk.vk.domain.coeff_to_extended(&shuffle.product_poly);
 

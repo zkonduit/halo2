@@ -68,6 +68,7 @@ rustacuda = { version = "0.1", optional = true }
 serde_derive = { version = "1", optional = true}
 bincode = { version = "1.3.3", default_features = false }
 serde = { version = "1.0.126", features = ["derive"] }
+instant = { version = "0.1" }
 
 
 # Developer tooling dependencies

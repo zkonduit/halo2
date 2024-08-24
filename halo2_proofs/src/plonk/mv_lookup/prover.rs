@@ -114,7 +114,7 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
             compressed_expression
         };
 
-        let start = std::time::Instant::now();
+        let start = instant::Instant::now();
         // Get values of input expressions involved in the lookup and compress them
         let compressed_inputs_expressions: Vec<_> = self
             .inputs_expressions
@@ -124,7 +124,7 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
         log::trace!("compressed_inputs_expressions {:?}", start.elapsed());
 
         // Get values of table expressions involved in the lookup and compress them
-        let start = std::time::Instant::now();
+        let start = instant::Instant::now();
         let compressed_table_expression = compress_expressions(&self.table_expressions);
         log::trace!("compressed_table_expression {:?}", start.elapsed());
 
@@ -133,7 +133,7 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
         let chunk_size = n - blinding_factors - 1;
 
         // compute m(X)
-        let start = std::time::Instant::now();
+        let start = instant::Instant::now();
         let table_index_value_mapping: HashMap<Vec<u8>, usize> = compressed_table_expression
             .par_iter()
             .take(chunk_size)
@@ -142,7 +142,7 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
             .collect();
         log::trace!("table_index_value_mapping {:?}", start.elapsed());
 
-        let start = std::time::Instant::now();
+        let start = instant::Instant::now();
         let m_values: Vec<F> = {
             use std::sync::atomic::{AtomicU64, Ordering};
             let m_values: Vec<AtomicU64> = (0..params.n()).map(|_| AtomicU64::new(0)).collect();
@@ -217,7 +217,7 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
         }
 
         // commit to m(X)
-        let start = std::time::Instant::now();
+        let start = instant::Instant::now();
         let blind = Blind(C::Scalar::ZERO);
         let m_commitment = params.commit_lagrange(&m_values, blind).to_affine();
         log::trace!("m_commitment {:?}", start.elapsed());
@@ -248,7 +248,7 @@ impl<C: CurveAffine> Prepared<C> {
             RHS = τ(X) * Π(φ_i(X)) * (∑ 1/(φ_i(X)) - m(X) / τ(X))))
         */
 
-        let start = std::time::Instant::now();
+        let start = instant::Instant::now();
         // ∑ 1/(φ_i(X))
         let mut inputs_log_derivatives = vec![C::Scalar::ZERO; params.n() as usize];
         for compressed_input_expression in self.compressed_inputs_expressions.iter() {
@@ -275,7 +275,7 @@ impl<C: CurveAffine> Prepared<C> {
 
         log::trace!(" - inputs_log_derivatives {:?}", start.elapsed());
 
-        let start = std::time::Instant::now();
+        let start = instant::Instant::now();
         // 1 / τ(X)
         let mut table_log_derivatives = vec![C::Scalar::ZERO; params.n() as usize];
         parallelize(
@@ -292,14 +292,14 @@ impl<C: CurveAffine> Prepared<C> {
 
         log::trace!(" - table_log_derivatives {:?}", start.elapsed());
 
-        let start = std::time::Instant::now();
+        let start = instant::Instant::now();
         table_log_derivatives.iter_mut().batch_invert();
         log::trace!(
             " - table_log_derivatives batch_invert {:?}",
             start.elapsed()
         );
 
-        let start = std::time::Instant::now();
+        let start = instant::Instant::now();
         // (Σ 1/(φ_i(X)) - m(X) / τ(X))
         let mut log_derivatives_diff = vec![C::Scalar::ZERO; params.n() as usize];
         parallelize(&mut log_derivatives_diff, |log_derivatives_diff, start| {
@@ -316,7 +316,7 @@ impl<C: CurveAffine> Prepared<C> {
 
         log::trace!(" - log_derivatives_diff {:?}", start.elapsed());
 
-        let start = std::time::Instant::now();
+        let start = instant::Instant::now();
         // Compute the evaluations of the lookup grand sum polynomial
         // over our domain, starting with phi[0] = 0
         let blinding_factors = vk.cs.blinding_factors();
@@ -397,7 +397,7 @@ impl<C: CurveAffine> Prepared<C> {
         }
 
         let grand_sum_blind = Blind(C::Scalar::ZERO);
-        let start = std::time::Instant::now();
+        let start = instant::Instant::now();
         let phi_commitment = params.commit_lagrange(&phi, grand_sum_blind).to_affine();
         log::trace!(" - phi_commitment {:?}", start.elapsed());
 

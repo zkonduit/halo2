@@ -2,6 +2,7 @@ use ff::{Field, FromUniformBytes, WithSmallOrderMulGroup};
 use group::Curve;
 use halo2curves::serde::SerdeObject;
 
+use instant::Instant;
 use rand_core::RngCore;
 use rustc_hash::FxBuildHasher;
 use rustc_hash::FxHashMap as HashMap;
@@ -9,7 +10,6 @@ use rustc_hash::FxHashSet as HashSet;
 use std::collections::BTreeSet;
 use std::iter;
 use std::ops::RangeTo;
-use std::time::Instant;
 
 use super::{
     circuit::{
