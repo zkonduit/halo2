@@ -1,48 +1,35 @@
 use group::ff::PrimeField;
-use icicle::{
-    curves::bn254::{Point_BN254, ScalarField_BN254},
-    test_bn254::commit_bn254,
-};
-use std::sync::{Arc, Once};
-
-pub use icicle::curves::bn254::PointAffineNoInfinity_BN254;
-use rustacuda::memory::CopyDestination;
-use rustacuda::prelude::*;
-
+use icicle_bn254::curve::{CurveCfg, G1Projective, ScalarField};
+use halo2curves::bn256::Fr as Bn256Fr;
+use icicle_cuda_runtime::{stream::CudaStream, memory::{DeviceVec, HostSlice}};
+use crate::arithmetic::FftGroup;
+use std::any::TypeId;
+use std::any::Any;
 pub use halo2curves::CurveAffine;
+use icicle_core::{
+    curve::Affine,
+    msm,
+    ntt::{get_root_of_unity, initialize_domain, ntt_inplace, NTTConfig, NTTDir},
+};
+use maybe_rayon::iter::IntoParallelRefIterator;
+use maybe_rayon::iter::ParallelIterator;
 use std::{env, mem};
-
-static mut GPU_CONTEXT: Option<Context> = None;
-static mut GPU_G: Option<DeviceBuffer<PointAffineNoInfinity_BN254>> = None;
-static mut GPU_G_LAGRANGE: Option<DeviceBuffer<PointAffineNoInfinity_BN254>> = None;
-static GPU_INIT: Once = Once::new();
 
 pub fn should_use_cpu_msm(size: usize) -> bool {
     size <= (1
         << u8::from_str_radix(&env::var("ICICLE_SMALL_K").unwrap_or("8".to_string()), 10).unwrap())
 }
 
-pub fn init_gpu<C: CurveAffine>(g: &[C], g_lagrange: &[C]) {
-    unsafe {
-        GPU_INIT.call_once(|| {
-            GPU_CONTEXT = Some(rustacuda::quick_init().unwrap());
-            GPU_G = Some(copy_points_to_device(g));
-            GPU_G_LAGRANGE = Some(copy_points_to_device(g_lagrange));
-        });
-    }
+pub fn should_use_cpu_fft(size: usize) -> bool {
+    size <= (1
+        << u8::from_str_radix(&env::var("ICICLE_SMALL_K_FFT").unwrap_or("8".to_string()), 10).unwrap())
 }
 
-fn u32_from_u8(u8_arr: &[u8; 32]) -> [u32; 8] {
-    let mut t = [0u32; 8];
-    for i in 0..8 {
-        t[i] = u32::from_le_bytes([
-            u8_arr[4 * i],
-            u8_arr[4 * i + 1],
-            u8_arr[4 * i + 2],
-            u8_arr[4 * i + 3],
-        ]);
+pub fn is_gpu_supported_field<G: Any>(_sample_element: &G) -> bool {
+    match TypeId::of::<G>() {
+        id if id == TypeId::of::<Bn256Fr>() => true,
+        _ => false,
     }
-    return t;
 }
 
 fn repr_from_u32<C: CurveAffine>(u32_arr: &[u32; 8]) -> <C as CurveAffine>::Base {
@@ -51,96 +38,93 @@ fn repr_from_u32<C: CurveAffine>(u32_arr: &[u32; 8]) -> <C as CurveAffine>::Base
     return PrimeField::from_repr(t[0]).unwrap();
 }
 
-fn is_infinity_point(point: Point_BN254) -> bool {
-    let inf_point = Point_BN254::infinity();
-    point.z.s.eq(&inf_point.z.s)
+fn icicle_scalars_from_c_scalars<G: PrimeField>(coeffs: &[G]) -> Vec<ScalarField> {
+    coeffs.par_iter().map(|coef| {
+        let repr: [u32; 8] = unsafe { mem::transmute_copy(&coef.to_repr()) };
+        ScalarField::from(repr)
+    }).collect()
 }
 
-fn icicle_scalars_from_c<C: CurveAffine>(coeffs: &[C::Scalar]) -> Vec<ScalarField_BN254> {
-    let _coeffs = [Arc::new(
-        coeffs.iter().map(|x| x.to_repr()).collect::<Vec<_>>(),
-    )];
-
-    let _coeffs: &Arc<Vec<[u32; 8]>> = unsafe { mem::transmute(&_coeffs) };
-    _coeffs
-        .iter()
-        .map(|x| ScalarField_BN254::from_limbs(x))
-        .collect::<Vec<_>>()
+fn c_scalars_from_icicle_scalars<G: PrimeField>(scalars: &[ScalarField]) -> Vec<G> {
+    scalars.par_iter().map(|scalar| {
+        let repr: G::Repr = unsafe { mem::transmute_copy(scalar) };
+        G::from_repr(repr).unwrap()
+    }).collect()
 }
 
-pub fn copy_scalars_to_device<C: CurveAffine>(
-    coeffs: &[C::Scalar],
-) -> DeviceBuffer<ScalarField_BN254> {
-    let scalars = icicle_scalars_from_c::<C>(coeffs);
+fn icicle_points_from_c<C: CurveAffine>(bases: &[C]) -> Vec<Affine<CurveCfg>> {
+    bases.par_iter().map(|p| {
+        let coordinates = p.coordinates().unwrap();
+        let x_repr: [u32; 8] = unsafe { mem::transmute_copy(&coordinates.x().to_repr()) };
+        let y_repr: [u32; 8] = unsafe { mem::transmute_copy(&coordinates.y().to_repr()) };
 
-    DeviceBuffer::from_slice(scalars.as_slice()).unwrap()
+        Affine::<CurveCfg>::from_limbs(x_repr, y_repr)
+    }).collect()
 }
 
-fn icicle_points_from_c<C: CurveAffine>(bases: &[C]) -> Vec<PointAffineNoInfinity_BN254> {
-    let _bases = [Arc::new(
-        bases
-            .iter()
-            .map(|p| {
-                let coordinates = p.coordinates().unwrap();
-                [coordinates.x().to_repr(), coordinates.y().to_repr()]
-            })
-            .collect::<Vec<_>>(),
-    )];
+fn c_from_icicle_point<C: CurveAffine>(point: &G1Projective) -> C::Curve {
+    let (x, y) = {
+        let affine: Affine<CurveCfg> = Affine::<CurveCfg>::from(*point);
 
-    let _bases: &Arc<Vec<[[u8; 32]; 2]>> = unsafe { mem::transmute(&_bases) };
-    _bases
-        .iter()
-        .map(|x| {
-            let tx = u32_from_u8(&x[0]);
-            let ty = u32_from_u8(&x[1]);
-            PointAffineNoInfinity_BN254::from_limbs(&tx, &ty)
-        })
-        .collect::<Vec<_>>()
-}
-
-pub fn copy_points_to_device<C: CurveAffine>(
-    bases: &[C],
-) -> DeviceBuffer<PointAffineNoInfinity_BN254> {
-    let points = icicle_points_from_c(bases);
-
-    DeviceBuffer::from_slice(points.as_slice()).unwrap()
-}
-
-fn c_from_icicle_point<C: CurveAffine>(commit_res: Point_BN254) -> C::Curve {
-    let (x, y) = if is_infinity_point(commit_res) {
         (
-            repr_from_u32::<C>(&[0u32; 8]),
-            repr_from_u32::<C>(&[0u32; 8]),
-        )
-    } else {
-        let affine_res_from_cuda = commit_res.to_affine();
-        (
-            repr_from_u32::<C>(&affine_res_from_cuda.x.s),
-            repr_from_u32::<C>(&affine_res_from_cuda.y.s),
+            repr_from_u32::<C>(&affine.x.into()),
+            repr_from_u32::<C>(&affine.y.into()),
         )
     };
 
-    let affine = C::from_xy(x, y).unwrap();
-    return affine.to_curve();
+    let affine = C::from_xy(x, y);
+
+    return affine.unwrap().to_curve();
 }
 
-pub fn multiexp_on_device<C: CurveAffine>(
-    mut coeffs: DeviceBuffer<ScalarField_BN254>,
-    is_lagrange: bool,
-) -> C::Curve {
-    let base_ptr: &mut DeviceBuffer<PointAffineNoInfinity_BN254>;
-    unsafe {
-        if is_lagrange {
-            base_ptr = GPU_G_LAGRANGE.as_mut().unwrap();
-        } else {
-            base_ptr = GPU_G.as_mut().unwrap();
-        };
-    }
+pub fn multiexp_on_device<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
+    let binding = icicle_scalars_from_c_scalars::<C::ScalarExt>(coeffs);
+    let coeffs = HostSlice::from_slice(&binding[..]);
+    let binding = icicle_points_from_c(bases);
+    let bases = HostSlice::from_slice(&binding[..]);
 
-    let d_commit_result = commit_bn254(base_ptr, &mut coeffs, 10);
+    let mut msm_results = DeviceVec::<G1Projective>::cuda_malloc(1).unwrap();
+    let mut cfg = msm::MSMConfig::default();
+    let stream = CudaStream::create().unwrap();
+    cfg.ctx.stream = &stream;
+    cfg.is_async = true;
+    cfg.large_bucket_factor = 10;
+    cfg.c = 16;
 
-    let mut h_commit_result = Point_BN254::zero();
-    d_commit_result.copy_to(&mut h_commit_result).unwrap();
+    msm::msm(coeffs, bases, &cfg, &mut msm_results[..]).unwrap();
+    stream.synchronize().unwrap();
 
-    c_from_icicle_point::<C>(h_commit_result)
+    let mut msm_host_result = vec![G1Projective::zero(); 1];
+    msm_results
+        .copy_to_host(HostSlice::from_mut_slice(&mut msm_host_result[..]))
+        .unwrap();
+
+    let msm_point = c_from_icicle_point::<C>(&msm_host_result[0]);
+
+    msm_point
+}
+pub fn fft_on_device<Scalar: ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeField>(
+    scalars: &mut [G], 
+    _omega: Scalar, 
+    log_n: u32, 
+    inverse: bool
+) {
+    let size: usize = 1 << log_n;
+    let mut cfg = NTTConfig::<'_, ScalarField>::default();
+    cfg.is_async = false;
+
+    let icicle_omega = get_root_of_unity::<ScalarField>((size as u64) * 10);
+    initialize_domain(icicle_omega, &cfg.ctx, true).unwrap();
+
+    let mut icicle_scalars: Vec<ScalarField> = icicle_scalars_from_c_scalars(scalars);
+    let host_scalars = HostSlice::from_mut_slice(&mut icicle_scalars);
+
+    ntt_inplace::<ScalarField, ScalarField>(
+        host_scalars,
+        if inverse { NTTDir::kInverse } else { NTTDir::kForward },
+        &cfg,
+    ).unwrap();
+
+    let c_scalars = &c_scalars_from_icicle_scalars::<G>(&mut host_scalars.as_slice())[..];
+    scalars.copy_from_slice(&c_scalars);
 }

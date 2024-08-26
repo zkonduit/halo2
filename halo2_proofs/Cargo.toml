@@ -63,7 +63,9 @@ lazy_static = { version = "1", optional = true }
 env_logger = "0.10.0"
 
 # GPU Icicle integration
-icicle = { git = "https://github.com/ingonyama-zk/icicle.git", branch = "rust/large-bucket-factor-msm", optional = true }
+icicle-core = { git = "https://github.com/ingonyama-zk/icicle", branch="ezkl-icicle2", package="icicle-core", optional = true }
+icicle-bn254 = { git = "https://github.com/ingonyama-zk/icicle", branch="ezkl-icicle2", package="icicle-bn254", optional = true }
+icicle-cuda-runtime = { git = "https://github.com/ingonyama-zk/icicle", branch="ezkl-icicle2", package="icicle-cuda-runtime", optional = true }
 rustacuda = { version = "0.1", optional = true }
 serde = { version = "1", optional = true, features = ["derive"] }
 serde_derive = { version = "1", optional = true}
@@ -90,10 +92,10 @@ getrandom = { version = "0.2", features = ["js"] }
 default = ["batch", "bits"]
 dev-graph = ["plotters", "tabbycat"]
 test-dev-graph = [
-    "dev-graph",
-    "plotters/bitmap_backend",
-    "plotters/bitmap_encoder",
-    "plotters/ttf",
+    "dev-graph", 
+    "plotters/bitmap_backend", 
+    "plotters/bitmap_encoder", 
+    "plotters/ttf"
 ]
 bits = ["halo2curves/bits"]
 gadget-traces = ["backtrace"]
@@ -102,7 +104,7 @@ sanity-checks = []
 batch = ["rand_core/getrandom"]
 circuit-params = []
 counter = ["lazy_static"]
-icicle_gpu = ["icicle", "rustacuda"]
+icicle_gpu = ["icicle-cuda-runtime", "icicle-bn254", "icicle-core"]
 mv-lookup = []
 cost-estimator = ["serde", "serde_derive"]
 derive_serde = ["halo2curves/derive_serde"]

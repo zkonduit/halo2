@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use super::commitment::ParamsKZG;
 use crate::{
-    arithmetic::{best_multiexp_cpu, parallelize},
+    arithmetic::{best_multiexp, parallelize},
     poly::commitment::MSM,
 };
 use group::{Curve, Group};
@@ -81,7 +81,8 @@ where
         use group::prime::PrimeCurveAffine;
         let mut bases = vec![E::G1Affine::identity(); self.scalars.len()];
         E::G1::batch_normalize(&self.bases, &mut bases);
-        best_multiexp_cpu(&self.scalars, &bases)
+
+        best_multiexp(&self.scalars, &bases)
     }
 
     fn bases(&self) -> Vec<E::G1> {

@@ -2,12 +2,12 @@
 //! domain that is of a suitable size for the application.
 
 use crate::{
-    arithmetic::{best_fft, parallelize},
+    arithmetic::{best_iftt, best_ftt, parallelize},
     plonk::Assigned,
 };
 
 use super::{Coeff, ExtendedLagrangeCoeff, LagrangeCoeff, Polynomial, Rotation};
-use ff::WithSmallOrderMulGroup;
+use ff::{PrimeField, WithSmallOrderMulGroup};
 use group::ff::{BatchInvert, Field};
 
 use std::marker::PhantomData;
@@ -16,7 +16,7 @@ use std::marker::PhantomData;
 /// performing operations on an evaluation domain of size $2^k$ and an extended
 /// domain of size $2^{k} * j$ with $j \neq 0$.
 #[derive(Clone, Debug)]
-pub struct EvaluationDomain<F: Field> {
+pub struct EvaluationDomain<F: PrimeField> {
     n: u64,
     k: u32,
     extended_k: u32,
@@ -235,7 +235,7 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
         assert_eq!(a.values.len(), 1 << self.k);
 
         // Perform inverse FFT to obtain the polynomial in coefficient form
-        Self::ifft(&mut a.values, self.omega_inv, self.k, self.ifft_divisor);
+        best_iftt(&mut a.values, self.omega_inv, self.k, self.ifft_divisor);
 
         Polynomial {
             values: a.values,
@@ -253,7 +253,7 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
 
         self.distribute_powers_zeta(&mut a.values, true);
         a.values.resize(self.extended_len(), F::ZERO);
-        best_fft(&mut a.values, self.extended_omega, self.extended_k);
+        best_ftt(&mut a.values, self.extended_omega, self.extended_k);
 
         Polynomial {
             values: a.values,
@@ -290,7 +290,7 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
         assert_eq!(a.values.len(), self.extended_len());
 
         // Inverse FFT
-        Self::ifft(
+        best_iftt(
             &mut a.values,
             self.extended_omega_inv,
             self.extended_k,
@@ -354,16 +354,6 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
                     *a *= &coset_powers[i - 1];
                 }
                 index += 1;
-            }
-        });
-    }
-
-    fn ifft(a: &mut [F], omega_inv: F, log_n: u32, divisor: F) {
-        best_fft(a, omega_inv, log_n);
-        parallelize(a, |a, _| {
-            for a in a {
-                // Finish iFFT
-                *a *= &divisor;
             }
         });
     }

@@ -1,6 +1,8 @@
 //! This module provides common utilities, traits and structures for group,
 //! field and polynomial arithmetic.
 
+#[cfg(feature = "icicle_gpu")]
+use super::icicle;
 use super::multicore;
 pub use ff::Field;
 use group::{
@@ -8,11 +10,6 @@ use group::{
     Curve, Group, GroupOpsOwned, ScalarMulOwned,
 };
 pub use halo2curves::{CurveAffine, CurveExt};
-
-#[cfg(feature = "icicle_gpu")]
-use super::icicle;
-#[cfg(feature = "icicle_gpu")]
-use rustacuda::prelude::DeviceBuffer;
 
 /// This represents an element of a group with basic operations that can be
 /// performed. This allows an FFT implementation (for example) to operate
@@ -145,11 +142,75 @@ pub fn small_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::C
 
 #[cfg(feature = "icicle_gpu")]
 /// Performs a multi-exponentiation operation on GPU using Icicle library
-pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], is_lagrange: bool) -> C::Curve {
-    let scalars_ptr: DeviceBuffer<::icicle::curves::bn254::ScalarField_BN254> =
-        icicle::copy_scalars_to_device::<C>(coeffs);
+pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], g: &[C]) -> C::Curve {
+    icicle::multiexp_on_device::<C>(coeffs, g)
+}
 
-    return icicle::multiexp_on_device::<C>(scalars_ptr, is_lagrange);
+/// Performs a multi-exponentiation operation
+pub fn best_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
+    #[cfg(not(feature = "icicle_gpu"))]
+    {
+        best_multiexp_cpu(coeffs, bases)
+    }
+
+    #[cfg(feature = "icicle_gpu")]
+    if !icicle::should_use_cpu_msm(bases.len()) && icicle::is_gpu_supported_field(&coeffs[0]) {
+        best_multiexp_gpu(coeffs, bases)
+    } else {
+        best_multiexp_cpu(coeffs, bases)
+    }
+}
+
+/// Performs a FTT operation
+pub fn best_ftt<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeField>(
+    scalars: &mut [G],
+    omega: Scalar,
+    log_n: u32,
+) {
+    #[cfg(not(feature = "icicle_gpu"))]
+    {
+        best_fft(scalars, omega, log_n);
+    }
+
+    #[cfg(feature = "icicle_gpu")]
+    {
+        if !icicle::should_use_cpu_fft(scalars.len()) && icicle::is_gpu_supported_field(&scalars[0]) {
+            best_fft_gpu(scalars, omega, log_n, false);
+        } else {
+            best_fft(scalars, omega, log_n);
+        }
+    }
+}
+
+/// Performs a iNTT operation
+pub fn best_iftt<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeField>(
+    scalars: &mut [G],
+    omega: Scalar,
+    log_n: u32,
+    divisor: Scalar,
+) {
+    #[cfg(feature = "icicle_gpu")]
+    {
+        if !icicle::should_use_cpu_fft(scalars.len()) && icicle::is_gpu_supported_field(&scalars[0]) {
+            best_fft_gpu(scalars, omega, log_n, true);
+        } else {
+            best_fft(scalars, omega, log_n);
+            parallelize(scalars, |a, _| {
+                for a in a {
+                    *a *= &divisor;
+                }
+            });
+        }
+    }
+    #[cfg(not(feature = "icicle_gpu"))]
+    {
+        best_fft(scalars, omega, log_n);
+        parallelize(scalars, |a, _| {
+            for a in a {
+                *a *= &divisor;
+            }
+        });
+    }
 }
 
 /// Performs a multi-exponentiation operation.
@@ -182,8 +243,20 @@ pub fn best_multiexp_cpu<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C
     } else {
         let mut acc = C::Curve::identity();
         multiexp_serial(coeffs, bases, &mut acc);
+
         acc
     }
+}
+
+/// Performs a NTT operation on GPU using Icicle library
+#[cfg(feature = "icicle_gpu")]
+pub fn best_fft_gpu<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeField>(
+    a: &mut [G],
+    omega: Scalar,
+    log_n: u32,
+    inverse: bool,
+) {
+    icicle::fft_on_device::<Scalar, G>(a, omega, log_n, inverse);
 }
 
 /// Performs a radix-$2$ Fast-Fourier Transformation (FFT) on a vector of size
@@ -226,7 +299,6 @@ pub fn best_fft<Scalar: Field, G: FftGroup<Scalar>>(a: &mut [G], omega: Scalar, 
             Some(tw)
         })
         .collect();
-
     if log_n <= log_threads {
         let mut chunk = 2_usize;
         let mut twiddle_chunk = n / 2;
