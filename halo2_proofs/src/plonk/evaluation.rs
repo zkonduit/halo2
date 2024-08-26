@@ -13,8 +13,6 @@ use crate::{
     arithmetic::{parallelize, CurveAffine},
     poly::{Coeff, ExtendedLagrangeCoeff, Polynomial, Rotation},
 };
-use std::time::{Instant};
-
 
 use group::ff::{Field, PrimeField, WithSmallOrderMulGroup};
 
@@ -388,7 +386,6 @@ impl<C: CurveAffine> Evaluator<C> {
         let l_last = &pk.l_last;
         let l_active_row = &pk.l_active_row;
         let p = &pk.vk.cs.permutation;
-
         // Calculate the advice and instance cosets
         let advice: Vec<Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>>> = advice_polys
             .iter()
@@ -449,9 +446,8 @@ impl<C: CurveAffine> Evaluator<C> {
                 }
             });
 
-
             // Permutations
-            let sets = &permutation.sets;
+            let sets: &_ = &permutation.sets;
             if !sets.is_empty() {
                 let blinding_factors = pk.vk.cs.blinding_factors();
                 let last_rotation = Rotation(-((blinding_factors + 1) as i32));
@@ -598,7 +594,7 @@ impl<C: CurveAffine> Evaluator<C> {
                 // they are actually needed.
                 let phi_coset = pk.vk.domain.coeff_to_extended(lookup.phi_poly.clone());
                 let m_coset = pk.vk.domain.coeff_to_extended(lookup.m_poly.clone());
-
+                
                 // Lookup constraints
                 /*
                     φ_i(X) = f_i(X) + α
@@ -647,7 +643,7 @@ impl<C: CurveAffine> Evaluator<C> {
                         let inputs_prod: C::Scalar = inputs_value
                             .iter()
                             .fold(C::Scalar::ONE, |acc, input| acc * input);
-
+                        
                         // f_i(X) + α at ω^idx
                         let fi_inverses = &inputs_inv_sum[n][idx];
                         let inputs_inv_sum = fi_inverses
@@ -672,7 +668,6 @@ impl<C: CurveAffine> Evaluator<C> {
                         );
 
                         let r_next = get_rotation_idx(idx, 1, rot_scale, isize);
-
                         let lhs = {
                             // τ(X) * Π(φ_i(X)) * (ϕ(gX) - ϕ(X))
                             table_value * inputs_prod * (phi_coset[r_next] - phi_coset[idx])
@@ -1104,3 +1099,5 @@ pub fn evaluate<F: Field, B: Basis>(
     });
     values
 }
+
+

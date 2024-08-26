@@ -10,22 +10,6 @@ use group::{
     Curve, Group, GroupOpsOwned, ScalarMulOwned,
 };
 pub use halo2curves::{CurveAffine, CurveExt};
-use lazy_static;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
-
-lazy_static::lazy_static! {
-    /// a
-    pub static ref TOTAL_DURATION_FFT_CPU: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
-    /// b
-    pub static ref TOTAL_DURATION_FFT_GPU: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
-    /// a
-    pub static ref TOTAL_FFT: Mutex<u64> = Mutex::new(0);
-    /// b
-    pub static ref TOTAL_DURATION_PARALLELIZE: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
-    /// d
-    pub static ref TOTAL_DURATION_EVAL_POLY: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
-}
 
 /// This represents an element of a group with basic operations that can be
 /// performed. This allows an FFT implementation (for example) to operate
@@ -177,8 +161,8 @@ pub fn best_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Cu
     }
 }
 
-/// a
-pub fn best_ntt<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeField>(
+/// Performs a FTT operation
+pub fn best_ftt<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeField>(
     scalars: &mut [G],
     omega: Scalar,
     log_n: u32,
@@ -198,8 +182,8 @@ pub fn best_ntt<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeF
     }
 }
 
-/// b
-pub fn best_intt<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeField>(
+/// Performs a iNTT operation
+pub fn best_iftt<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeField>(
     scalars: &mut [G],
     omega: Scalar,
     log_n: u32,
@@ -264,7 +248,7 @@ pub fn best_multiexp_cpu<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C
     }
 }
 
-/// a
+/// Performs a NTT operation on GPU using Icicle library
 #[cfg(feature = "icicle_gpu")]
 pub fn best_fft_gpu<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeField>(
     a: &mut [G],
@@ -272,14 +256,7 @@ pub fn best_fft_gpu<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::Pr
     log_n: u32,
     inverse: bool,
 ) {
-    let start_time: Instant = Instant::now();
-    icicle::ntt_on_device::<Scalar, G>(a, omega, log_n, inverse);
-    let mut total_duration: std::sync::MutexGuard<Duration> =
-        TOTAL_DURATION_FFT_GPU.lock().unwrap();
-    let mut total_count = TOTAL_FFT.lock().unwrap();
-    *total_count += 1;
-
-    *total_duration += start_time.elapsed();
+    icicle::fft_on_device::<Scalar, G>(a, omega, log_n, inverse);
 }
 
 /// Performs a radix-$2$ Fast-Fourier Transformation (FFT) on a vector of size
@@ -293,7 +270,6 @@ pub fn best_fft_gpu<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::Pr
 ///
 /// This will use multithreading if beneficial.
 pub fn best_fft<Scalar: Field, G: FftGroup<Scalar>>(a: &mut [G], omega: Scalar, log_n: u32) {
-    let start_time: Instant = Instant::now();
     fn bitreverse(mut n: usize, l: usize) -> usize {
         let mut r = 0;
         for _ in 0..l {
@@ -353,14 +329,7 @@ pub fn best_fft<Scalar: Field, G: FftGroup<Scalar>>(a: &mut [G], omega: Scalar, 
             twiddle_chunk /= 2;
         }
     } else {
-        let res = recursive_butterfly_arithmetic(a, n, 1, &twiddles);
-
-        let mut total_duration = TOTAL_DURATION_FFT_CPU.lock().unwrap();
-        let mut total_count = TOTAL_FFT.lock().unwrap();
-        *total_count += 1;
-
-        *total_duration += start_time.elapsed();
-        res
+        recursive_butterfly_arithmetic(a, n, 1, &twiddles)
     }
 }
 
@@ -433,7 +402,6 @@ pub fn g_to_lagrange<C: CurveAffine>(g_projective: Vec<C::Curve>, k: u32) -> Vec
 
 /// This evaluates a provided polynomial (in coefficient form) at `point`.
 pub fn eval_polynomial<F: Field>(poly: &[F], point: F) -> F {
-    let start_time = Instant::now();
     fn evaluate<F: Field>(poly: &[F], point: F) -> F {
         poly.iter()
             .rev()
@@ -441,9 +409,8 @@ pub fn eval_polynomial<F: Field>(poly: &[F], point: F) -> F {
     }
     let n = poly.len();
     let num_threads = multicore::current_num_threads();
-    let res;
     if n * 2 < num_threads {
-        res = evaluate(poly, point);
+        evaluate(poly, point)
     } else {
         let chunk_size = (n + num_threads - 1) / num_threads;
         let mut parts = vec![F::ZERO; num_threads];
@@ -457,12 +424,8 @@ pub fn eval_polynomial<F: Field>(poly: &[F], point: F) -> F {
                 });
             }
         });
-        res = parts.iter().fold(F::ZERO, |acc, coeff| acc + coeff);
+        parts.iter().fold(F::ZERO, |acc, coeff| acc + coeff)
     }
-
-    let mut total_duration = TOTAL_DURATION_EVAL_POLY.lock().unwrap();
-    *total_duration += start_time.elapsed();
-    res
 }
 
 /// This computes the inner product of two vectors `a` and `b`.
@@ -506,7 +469,6 @@ where
 /// This utility function will parallelize an operation that is to be
 /// performed over a mutable slice.
 pub fn parallelize<T: Send, F: Fn(&mut [T], usize) + Send + Sync + Clone>(v: &mut [T], f: F) {
-    let start_time = Instant::now();
     // Algorithm rationale:
     //
     // Using the stdlib `chunks_mut` will lead to severe load imbalance.
@@ -554,9 +516,6 @@ pub fn parallelize<T: Send, F: Fn(&mut [T], usize) + Send + Sync + Clone>(v: &mu
             }
         }
     });
-
-    let mut total_duration = TOTAL_DURATION_PARALLELIZE.lock().unwrap();
-    *total_duration += start_time.elapsed();
 }
 
 fn log2_floor(num: usize) -> u32 {

@@ -2,7 +2,7 @@
 //! domain that is of a suitable size for the application.
 
 use crate::{
-    arithmetic::{best_intt, best_ntt, parallelize},
+    arithmetic::{best_iftt, best_ftt, parallelize},
     plonk::Assigned,
 };
 
@@ -235,7 +235,7 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
         assert_eq!(a.values.len(), 1 << self.k);
 
         // Perform inverse FFT to obtain the polynomial in coefficient form
-        best_intt(&mut a.values, self.omega_inv, self.k, self.ifft_divisor);
+        best_iftt(&mut a.values, self.omega_inv, self.k, self.ifft_divisor);
 
         Polynomial {
             values: a.values,
@@ -253,7 +253,7 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
 
         self.distribute_powers_zeta(&mut a.values, true);
         a.values.resize(self.extended_len(), F::ZERO);
-        best_ntt(&mut a.values, self.extended_omega, self.extended_k);
+        best_ftt(&mut a.values, self.extended_omega, self.extended_k);
 
         Polynomial {
             values: a.values,
@@ -290,7 +290,7 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
         assert_eq!(a.values.len(), self.extended_len());
 
         // Inverse FFT
-        best_intt(
+        best_iftt(
             &mut a.values,
             self.extended_omega_inv,
             self.extended_k,
@@ -356,10 +356,6 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
                 index += 1;
             }
         });
-    }
-
-    fn ifft(scalars: &mut [F], omega_inv: F, log_n: u32, divisor: F) {
-        best_intt(scalars, omega_inv, log_n, divisor);
     }
 
     /// Get the size of the domain

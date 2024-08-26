@@ -18,11 +18,9 @@ use super::{
 use super::lookup;
 #[cfg(feature = "mv-lookup")]
 use super::mv_lookup as lookup;
-#[cfg(feature = "icicle_gpu")]
-use crate::icicle::{TOTAL_DURATION_MULTIEXP_CONVERT_TO_ICICLE, TOTAL_DURATION_MULTIEXP_INITIALIZATION, TOTAL_DURATION_MULTIEXP_EXECUTION, TOTAL_DURATION_MULTIEXP_COPY_TO_HOST, TOTAL_DURATION_MULTIEXP_CONVERT_TO_ORIGINAL, TOTAL_DURATION_INITIALIZATION, TOTAL_DURATION_CONVERT_TO_ICICLE, TOTAL_DURATION_EXECUTION, TOTAL_DURATION_NTT, TOTAL_DURATION_CONVERT_TO_ORIGINAL};
 
 use crate::{
-    arithmetic::{eval_polynomial, CurveAffine, TOTAL_DURATION_EVAL_POLY, TOTAL_FFT, TOTAL_DURATION_FFT_CPU, TOTAL_DURATION_FFT_GPU, TOTAL_DURATION_PARALLELIZE},
+    arithmetic::{eval_polynomial, CurveAffine},
     circuit::Value,
     plonk::Assigned,
     poly::{
@@ -766,30 +764,6 @@ where
     let res = prover
         .create_proof(rng, transcript, instances)
         .map_err(|_| Error::ConstraintSystemFailure);
-
-
-    println!("TOTAL_DURATION_FFT_CPU: {:?}", TOTAL_DURATION_FFT_CPU.lock().unwrap());
-    println!("TOTAL_DURATION_FFT_GPU: {:?}", TOTAL_DURATION_FFT_GPU.lock().unwrap());
-    println!("TOTAL_FFT: {:?}", TOTAL_FFT.lock().unwrap());
-    println!("TOTAL_DURATION_EVAL_POLY: {:?}", TOTAL_DURATION_EVAL_POLY.lock().unwrap());
-    println!("TOTAL_DURATION_PARALLELIZE: {:?}", TOTAL_DURATION_PARALLELIZE.lock().unwrap());
-    #[cfg(feature = "icicle_gpu")]
-    {
-        println!("TOTAL_DURATION_EXECUTION: {:?}", TOTAL_DURATION_EXECUTION.lock().unwrap());
-        println!("TOTAL_DURATION_NTT: {:?}", TOTAL_DURATION_NTT.lock().unwrap());
-        println!("TOTAL_DURATION_INITIALIZATION: {:?}", TOTAL_DURATION_INITIALIZATION.lock().unwrap());
-        println!("TOTAL_DURATION_CONVERT_TO_ORIGINAL: {:?}", TOTAL_DURATION_CONVERT_TO_ORIGINAL.lock().unwrap());
-        println!("TOTAL_DURATION_CONVERT_TO_ICICLE: {:?}", TOTAL_DURATION_CONVERT_TO_ICICLE.lock().unwrap());
-    }
-
-    #[cfg(feature = "icicle_gpu")]
-    {
-        println!("TOTAL_DURATION_MULTIEXP_CONVERT_TO_ICICLE: {:?}", TOTAL_DURATION_MULTIEXP_CONVERT_TO_ICICLE.lock().unwrap());
-        println!("TOTAL_DURATION_MULTIEXP_INITIALIZATION: {:?}", TOTAL_DURATION_MULTIEXP_INITIALIZATION.lock().unwrap());
-        println!("TOTAL_DURATION_MULTIEXP_EXECUTION: {:?}", TOTAL_DURATION_MULTIEXP_EXECUTION.lock().unwrap());
-        println!("TOTAL_DURATION_MULTIEXP_COPY_TO_HOST: {:?}", TOTAL_DURATION_MULTIEXP_COPY_TO_HOST.lock().unwrap());
-        println!("TOTAL_DURATION_MULTIEXP_CONVERT_TO_ORIGINAL: {:?}", TOTAL_DURATION_MULTIEXP_CONVERT_TO_ORIGINAL.lock().unwrap());
-    }
 
     res
 }
