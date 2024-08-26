@@ -386,6 +386,7 @@ impl<C: CurveAffine> Evaluator<C> {
         let l_last = &pk.l_last;
         let l_active_row = &pk.l_active_row;
         let p = &pk.vk.cs.permutation;
+
         // Calculate the advice and instance cosets
         let advice: Vec<Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>>> = advice_polys
             .iter()
@@ -594,7 +595,7 @@ impl<C: CurveAffine> Evaluator<C> {
                 // they are actually needed.
                 let phi_coset = pk.vk.domain.coeff_to_extended(lookup.phi_poly.clone());
                 let m_coset = pk.vk.domain.coeff_to_extended(lookup.m_poly.clone());
-                
+
                 // Lookup constraints
                 /*
                     φ_i(X) = f_i(X) + α

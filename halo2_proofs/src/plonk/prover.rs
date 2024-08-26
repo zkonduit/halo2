@@ -96,6 +96,7 @@ where
         pub instance_values: Vec<Polynomial<C::Scalar, LagrangeCoeff>>,
         pub instance_polys: Vec<Polynomial<C::Scalar, Coeff>>,
     }
+    
     let instance: Vec<InstanceSingle<Scheme::Curve>> = instances
         .iter()
         .map(|instance| -> Result<InstanceSingle<Scheme::Curve>, Error> {
@@ -143,7 +144,7 @@ where
                     domain.lagrange_to_coeff(lagrange_vec)
                 })
                 .collect();
-            
+
             Ok(InstanceSingle {
                 instance_values,
                 instance_polys,
@@ -416,6 +417,7 @@ where
                     advice.advice_blinds[*column_index] = blind;
                 }
             }
+
             for (index, phase) in meta.challenge_phase.iter().enumerate() {
                 if current_phase == *phase {
                     let existing =
@@ -494,6 +496,7 @@ where
 
     // Sample beta challenge
     let beta: ChallengeBeta<_> = transcript.squeeze_challenge_scalar();
+
     // Sample gamma challenge
     let gamma: ChallengeGamma<_> = transcript.squeeze_challenge_scalar();
 
@@ -614,9 +617,10 @@ where
         &shuffles,
         &permutations,
     );
-    
+
     // Construct the vanishing argument's h(X) commitments
     let vanishing = vanishing.construct(params, domain, h_poly, &mut rng, transcript)?;
+
     let x: ChallengeX<_> = transcript.squeeze_challenge_scalar();
     let xn = x.pow([params.n()]);
 
@@ -661,6 +665,7 @@ where
             transcript.write_scalar(*eval)?;
         }
     }
+
     // Compute and hash fixed evals (shared across all circuit instances)
     let fixed_evals: Vec<_> = meta
         .fixed_queries
@@ -669,6 +674,7 @@ where
             eval_polynomial(&pk.fixed_polys[column.index()], domain.rotate_omega(*x, at))
         })
         .collect();
+
     // Hash each fixed column evaluation
     for eval in fixed_evals.iter() {
         transcript.write_scalar(*eval)?;
