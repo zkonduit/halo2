@@ -96,7 +96,7 @@ where
         pub instance_values: Vec<Polynomial<C::Scalar, LagrangeCoeff>>,
         pub instance_polys: Vec<Polynomial<C::Scalar, Coeff>>,
     }
-    
+
     let instance: Vec<InstanceSingle<Scheme::Curve>> = instances
         .iter()
         .map(|instance| -> Result<InstanceSingle<Scheme::Curve>, Error> {
