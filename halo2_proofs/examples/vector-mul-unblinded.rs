@@ -334,14 +334,14 @@ fn main() {
     // of the instance column, so we position it there in our public inputs.
     let mut public_inputs = c;
 
-    let start = std::time::Instant::now();
+    let start = instant::Instant::now();
     // Given the correct public input, our circuit will verify.
     let prover = MockProver::run(k, &circuit, vec![public_inputs.clone()]).unwrap();
     assert_eq!(prover.verify(), Ok(()));
     println!("positive test took {:?}", start.elapsed());
 
     // If we try some other public input, the proof will fail!
-    let start = std::time::Instant::now();
+    let start = instant::Instant::now();
     public_inputs[0] += Fp::one();
     let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
     assert!(prover.verify().is_err());

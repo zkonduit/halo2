@@ -250,9 +250,9 @@ fn main() {
     println!("k = {K}");
     // time it
     println!("keygen");
-    let start = std::time::Instant::now();
+    let start = instant::Instant::now();
     let (params, pk) = keygen(K);
-    let end = std::time::Instant::now();
+    let end = instant::Instant::now();
     println!("keygen time: {:?}", end.duration_since(start));
 
     println!("saving proving key 💾");
@@ -267,7 +267,7 @@ fn main() {
 
     println!("reloading proving key 💾");
 
-    let f = std::fs::File::open(path.clone()).unwrap();
+    let f = std::fs::File::open(path).unwrap();
     let mut reader = std::io::BufReader::new(f);
     #[cfg(feature = "circuit-params")]
     let pk = ProvingKey::<G1Affine>::read::<_, MyCircuit<Fr>>(
@@ -297,7 +297,7 @@ fn main() {
 
     println!("reloading verifier key 💾");
 
-    let f = std::fs::File::open(path.clone()).unwrap();
+    let f = std::fs::File::open(path).unwrap();
     let mut reader = std::io::BufReader::new(f);
     #[cfg(feature = "circuit-params")]
     let vk = VerifyingKey::<G1Affine>::read::<_, MyCircuit<Fr>>(
@@ -315,14 +315,14 @@ fn main() {
 
     // time it
     println!("prover");
-    let start = std::time::Instant::now();
+    let start = instant::Instant::now();
     let proof = prover(K, &params, &pk);
-    let end = std::time::Instant::now();
+    let end = instant::Instant::now();
     println!("prover time: {:?}", end.duration_since(start));
     // time it
     println!("verifier");
-    let start = std::time::Instant::now();
+    let start = instant::Instant::now();
     verifier(&params, &vk, &proof);
-    let end = std::time::Instant::now();
+    let end = instant::Instant::now();
     println!("verifier time: {:?}", end.duration_since(start));
 }

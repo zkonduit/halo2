@@ -7,6 +7,7 @@
 #![deny(missing_debug_implementations)]
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
+#![feature(int_roundings)]
 
 #[cfg(feature = "counter")]
 #[macro_use]
@@ -29,6 +30,7 @@ lazy_static! {
 
 pub mod arithmetic;
 pub mod circuit;
+pub mod fft;
 pub use halo2curves;
 mod multicore;
 pub mod plonk;

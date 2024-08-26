@@ -3,7 +3,9 @@ use super::super::{
     ProvingKey,
 };
 use super::Argument;
+use crate::helpers::SerdeCurveAffine;
 use crate::plonk::evaluation::evaluate;
+use crate::SerdeFormat;
 use crate::{
     arithmetic::{eval_polynomial, parallelize, CurveAffine},
     poly::{
@@ -23,6 +25,7 @@ use maybe_rayon::prelude::{
 };
 use maybe_rayon::slice::ParallelSliceMut;
 use rand_core::RngCore;
+
 use std::{
     collections::BTreeMap,
     iter,
@@ -49,6 +52,49 @@ pub(in crate::plonk) struct Committed<C: CurveAffine> {
     permuted_table_blind: Blind<C::Scalar>,
     pub(in crate::plonk) product_poly: Polynomial<C::Scalar, Coeff>,
     product_blind: Blind<C::Scalar>,
+    pub(in crate::plonk) commitment: C,
+}
+
+impl<C: SerdeCurveAffine> Committed<C> {
+    pub fn write<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+        format: SerdeFormat,
+    ) -> std::io::Result<()>
+    where
+        <C as CurveAffine>::ScalarExt: crate::helpers::SerdePrimeField,
+    {
+        self.permuted_input_poly.write(writer, format)?;
+        self.permuted_input_blind.write(writer, format)?;
+        self.permuted_table_poly.write(writer, format)?;
+        self.permuted_table_blind.write(writer, format)?;
+        self.product_poly.write(writer, format)?;
+        self.product_blind.write(writer, format)?;
+
+        self.commitment.write(writer, format)
+    }
+
+    pub fn read<R: std::io::Read>(reader: &mut R, format: SerdeFormat) -> std::io::Result<Self>
+    where
+        <C as CurveAffine>::ScalarExt: crate::helpers::SerdePrimeField,
+    {
+        let permuted_input_poly = Polynomial::read(reader, format)?;
+        let permuted_input_blind = Blind::read(reader, format)?;
+        let permuted_table_poly = Polynomial::read(reader, format)?;
+        let permuted_table_blind = Blind::read(reader, format)?;
+        let product_poly = Polynomial::read(reader, format)?;
+        let product_blind = Blind::read(reader, format)?;
+        let commitment = C::read(reader, format)?;
+        Ok(Committed {
+            permuted_input_poly,
+            permuted_input_blind,
+            permuted_table_poly,
+            permuted_table_blind,
+            product_poly,
+            product_blind,
+            commitment,
+        })
+    }
 }
 
 pub(in crate::plonk) struct Evaluated<C: CurveAffine> {
@@ -306,6 +352,7 @@ impl<C: CurveAffine> Permuted<C> {
             permuted_table_blind: self.permuted_table_blind,
             product_poly: z,
             product_blind,
+            commitment: product_commitment,
         })
     }
 }
@@ -416,7 +463,7 @@ fn permute_expression_pair<'params, C: CurveAffine, P: Params<'params, C>, R: Rn
         );
     }*/
     #[cfg(not(target_arch = "wasm32"))]
-    let start = std::time::Instant::now();
+    let start = instant::Instant::now();
     let res =
         permute_expression_pair_par(pk, params, domain, rng, input_expression, table_expression);
     #[cfg(not(target_arch = "wasm32"))]

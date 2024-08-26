@@ -15,11 +15,17 @@ use crate::{
 };
 
 use group::ff::{Field, PrimeField, WithSmallOrderMulGroup};
+use maybe_rayon::iter::IndexedParallelIterator;
+use maybe_rayon::iter::IntoParallelRefIterator;
+use maybe_rayon::iter::ParallelIterator;
 
 use super::{shuffle, ConstraintSystem, Expression};
 
 #[cfg(feature = "mv-lookup")]
 use ff::BatchInvert;
+
+#[cfg(feature = "mv-lookup")]
+use maybe_rayon::iter::IntoParallelRefMutIterator;
 
 /// Return the index in the polynomial of size `isize` after rotation `rot`.
 fn get_rotation_idx(idx: usize, rot: i32, rot_scale: i32, isize: i32) -> usize {
@@ -375,6 +381,7 @@ impl<C: CurveAffine> Evaluator<C> {
         shuffles: &[Vec<shuffle::prover::Committed<C>>],
         permutations: &[permutation::prover::Committed<C>],
     ) -> Polynomial<C::ScalarExt, ExtendedLagrangeCoeff> {
+        let start = instant::Instant::now();
         let domain = &pk.vk.domain;
         let size = domain.extended_len();
         let rot_scale = 1 << (domain.extended_k() - domain.k());
@@ -386,30 +393,38 @@ impl<C: CurveAffine> Evaluator<C> {
         let l_last = &pk.l_last;
         let l_active_row = &pk.l_active_row;
         let p = &pk.vk.cs.permutation;
+        log::trace!(" - Initialization: {:?}", start.elapsed());
 
+        let start = instant::Instant::now();
         // Calculate the advice and instance cosets
         let advice: Vec<Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>>> = advice_polys
             .iter()
             .map(|advice_polys| {
                 advice_polys
-                    .iter()
-                    .map(|poly| domain.coeff_to_extended(poly.clone()))
+                    .par_iter()
+                    .map(|poly| domain.coeff_to_extended(poly))
                     .collect()
             })
             .collect();
+        log::trace!(" - Advice cosets: {:?}", start.elapsed());
+
+        let start = instant::Instant::now();
         let instance: Vec<Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>>> = instance_polys
             .iter()
             .map(|instance_polys| {
                 instance_polys
-                    .iter()
-                    .map(|poly| domain.coeff_to_extended(poly.clone()))
+                    .par_iter()
+                    .map(|poly| domain.coeff_to_extended(poly))
                     .collect()
             })
             .collect();
+        log::trace!(" - Instance cosets: {:?}", start.elapsed());
 
         let mut values = domain.empty_extended();
 
         // Core expression evaluations
+
+        let start = instant::Instant::now();
         let num_threads = multicore::current_num_threads();
         for ((((advice, instance), lookups), shuffles), permutation) in advice
             .iter()
@@ -419,6 +434,7 @@ impl<C: CurveAffine> Evaluator<C> {
             .zip(permutations.iter())
         {
             // Custom gates
+
             multicore::scope(|scope| {
                 let chunk_size = (size + num_threads - 1) / num_threads;
                 for (thread_idx, values) in values.chunks_mut(chunk_size).enumerate() {
@@ -446,8 +462,10 @@ impl<C: CurveAffine> Evaluator<C> {
                     });
                 }
             });
+            log::trace!(" - Custom gates: {:?}", start.elapsed());
 
             // Permutations
+            let start = instant::Instant::now();
             let sets = &permutation.sets;
             if !sets.is_empty() {
                 let blinding_factors = pk.vk.cs.blinding_factors();
@@ -528,16 +546,20 @@ impl<C: CurveAffine> Evaluator<C> {
                     }
                 });
             }
+            log::trace!(" - Permutations: {:?}", start.elapsed());
 
+            let start = instant::Instant::now();
             // For lookups, compute inputs_inv_sum = ∑ 1 / (f_i(X) + α)
             // The outer vector has capacity self.lookups.len()
             // The middle vector has capacity domain.extended_len()
             // The inner vector has capacity
+            log::trace!("num lookups: {}", lookups.len());
+
             #[cfg(feature = "mv-lookup")]
-            let inputs_inv_sum: Vec<Vec<Vec<_>>> = lookups
-                .iter()
+            let inputs_inv_sum_cosets: Vec<_> = lookups
+                .par_iter()
                 .enumerate()
-                .map(|(n, _)| {
+                .map(|(n, lookup)| {
                     let (inputs_lookup_evaluator, _) = &self.lookups[n];
                     let mut inputs_eval_data: Vec<_> = inputs_lookup_evaluator
                         .iter()
@@ -550,8 +572,8 @@ impl<C: CurveAffine> Evaluator<C> {
                         // For each compressed input column, evaluate at ω^i and add beta
                         // This is a vector of length self.lookups[n].0.len()
                         let inputs_values: Vec<C::ScalarExt> = inputs_lookup_evaluator
-                            .iter()
-                            .zip(inputs_eval_data.iter_mut())
+                            .par_iter()
+                            .zip(inputs_eval_data.par_iter_mut())
                             .map(|(input_lookup_evaluator, input_eval_data)| {
                                 input_lookup_evaluator.evaluate(
                                     input_eval_data,
@@ -583,29 +605,38 @@ impl<C: CurveAffine> Evaluator<C> {
                         .map(|c| c.to_vec())
                         .collect();
 
-                    inputs_inv_sums
+                    (
+                        inputs_inv_sums,
+                        domain.coeff_to_extended(&lookup.phi_poly),
+                        domain.coeff_to_extended(&lookup.m_poly),
+                    )
                 })
                 .collect();
+            #[cfg(feature = "mv-lookup")]
+            log::trace!(" - Lookups inv sum: {:?}", start.elapsed());
 
+            #[cfg(feature = "mv-lookup")]
+            let start = instant::Instant::now();
             // Lookups
             #[cfg(feature = "mv-lookup")]
-            for (n, lookup) in lookups.iter().enumerate() {
-                // Polynomials required for this lookup.
-                // Calculated here so these only have to be kept in memory for the short time
-                // they are actually needed.
-                let phi_coset = pk.vk.domain.coeff_to_extended(lookup.phi_poly.clone());
-                let m_coset = pk.vk.domain.coeff_to_extended(lookup.m_poly.clone());
+            parallelize(&mut values, |values, start| {
+                for (n, _lookup) in lookups.iter().enumerate() {
+                    // Polynomials required for this lookup.
+                    // Calculated here so these only have to be kept in memory for the short time
+                    // they are actually needed.
 
-                // Lookup constraints
-                /*
-                    φ_i(X) = f_i(X) + α
-                    τ(X) = t(X) + α
-                    LHS = τ(X) * Π(φ_i(X)) * (ϕ(gX) - ϕ(X))
-                    RHS = τ(X) * Π(φ_i(X)) * (∑ 1/(φ_i(X)) - m(X) / τ(X))))
-                        = (τ(X) * Π(φ_i(X)) * ∑ 1/(φ_i(X))) - Π(φ_i(X)) * m(X)
-                        = Π(φ_i(X)) * (τ(X) * ∑ 1/(φ_i(X)) - m(X))
-                */
-                parallelize(&mut values, |values, start| {
+                    let (inputs_inv_sum, phi_coset, m_coset) = &inputs_inv_sum_cosets[n];
+
+                    // Lookup constraints
+                    /*
+                        φ_i(X) = f_i(X) + α
+                        τ(X) = t(X) + α
+                        LHS = τ(X) * Π(φ_i(X)) * (ϕ(gX) - ϕ(X))
+                        RHS = τ(X) * Π(φ_i(X)) * (∑ 1/(φ_i(X)) - m(X) / τ(X))))
+                            = (τ(X) * Π(φ_i(X)) * ∑ 1/(φ_i(X))) - Π(φ_i(X)) * m(X)
+                            = Π(φ_i(X)) * (τ(X) * ∑ 1/(φ_i(X)) - m(X))
+                    */
+
                     let (inputs_lookup_evaluator, table_lookup_evaluator) = &self.lookups[n];
                     let mut inputs_eval_data: Vec<_> = inputs_lookup_evaluator
                         .iter()
@@ -646,7 +677,7 @@ impl<C: CurveAffine> Evaluator<C> {
                             .fold(C::Scalar::ONE, |acc, input| acc * input);
 
                         // f_i(X) + α at ω^idx
-                        let fi_inverses = &inputs_inv_sum[n][idx];
+                        let fi_inverses = &inputs_inv_sum[idx];
                         let inputs_inv_sum = fi_inverses
                             .iter()
                             .fold(C::Scalar::ZERO, |acc, input| acc + input);
@@ -691,8 +722,27 @@ impl<C: CurveAffine> Evaluator<C> {
                         // q(X) = LHS - RHS mod zH(X)
                         *value = *value * y + (lhs - rhs) * l_active_row[idx];
                     }
-                });
-            }
+                }
+            });
+
+            // delete the cosets
+            #[cfg(feature = "mv-lookup")]
+            drop(inputs_inv_sum_cosets);
+
+            #[cfg(all(not(feature = "mv-lookup"), feature = "precompute-coset"))]
+            let mut cosets: Vec<_> = {
+                let domain = &pk.vk.domain;
+                lookups
+                    .par_iter()
+                    .map(|lookup| {
+                        (
+                            domain.coeff_to_extended(lookup.product_poly.clone()),
+                            domain.coeff_to_extended(lookup.permuted_input_poly.clone()),
+                            domain.coeff_to_extended(lookup.permuted_table_poly.clone()),
+                        )
+                    })
+                    .collect()
+            };
 
             #[cfg(not(feature = "mv-lookup"))]
             // Lookups
@@ -700,15 +750,19 @@ impl<C: CurveAffine> Evaluator<C> {
                 // Polynomials required for this lookup.
                 // Calculated here so these only have to be kept in memory for the short time
                 // they are actually needed.
-                let product_coset = pk.vk.domain.coeff_to_extended(lookup.product_poly.clone());
-                let permuted_input_coset = pk
-                    .vk
-                    .domain
-                    .coeff_to_extended(lookup.permuted_input_poly.clone());
-                let permuted_table_coset = pk
-                    .vk
-                    .domain
-                    .coeff_to_extended(lookup.permuted_table_poly.clone());
+
+                #[cfg(feature = "precompute-coset")]
+                let (product_coset, permuted_input_coset, permuted_table_coset) = &cosets.remove(0);
+
+                #[cfg(not(feature = "precompute-coset"))]
+                let (product_coset, permuted_input_coset, permuted_table_coset) = {
+                    let product_coset = pk.vk.domain.coeff_to_extended(&lookup.product_poly);
+                    let permuted_input_coset =
+                        pk.vk.domain.coeff_to_extended(&lookup.permuted_input_poly);
+                    let permuted_table_coset =
+                        pk.vk.domain.coeff_to_extended(&lookup.permuted_table_poly);
+                    (product_coset, permuted_input_coset, permuted_table_coset)
+                };
 
                 // Lookup constraints
                 parallelize(&mut values, |values, start| {
@@ -769,10 +823,12 @@ impl<C: CurveAffine> Evaluator<C> {
                     }
                 });
             }
+            log::trace!(" - Lookups constraints: {:?}", start.elapsed());
 
             // Shuffle constraints
+            let start = instant::Instant::now();
             for (n, shuffle) in shuffles.iter().enumerate() {
-                let product_coset = pk.vk.domain.coeff_to_extended(shuffle.product_poly.clone());
+                let product_coset = pk.vk.domain.coeff_to_extended(&shuffle.product_poly);
 
                 // Shuffle constraints
                 parallelize(&mut values, |values, start| {
@@ -831,6 +887,7 @@ impl<C: CurveAffine> Evaluator<C> {
                     }
                 });
             }
+            log::trace!(" - Shuffle constraints: {:?}", start.elapsed());
         }
         values
     }

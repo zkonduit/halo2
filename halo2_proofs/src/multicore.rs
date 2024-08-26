@@ -1,9 +1,7 @@
 pub use maybe_rayon::{
     current_num_threads,
-    iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
+    iter::{IntoParallelIterator, ParallelIterator},
     join, scope,
-    slice::ParallelSliceMut,
-    Scope,
 };
 
 pub trait TryFoldAndReduce<T, E> {

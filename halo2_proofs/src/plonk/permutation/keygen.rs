@@ -384,7 +384,7 @@ pub(crate) fn build_pk<'params, C: CurveAffine, P: Params<'params, C>>(
             for (x, coset) in o.iter_mut().enumerate() {
                 let i = start + x;
                 let poly = polys[i].clone();
-                *coset = domain.coeff_to_extended(poly);
+                *coset = domain.coeff_to_extended(&poly);
             }
         });
     }

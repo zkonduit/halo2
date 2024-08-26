@@ -9,6 +9,7 @@ use crate::SerdeFormat;
 use group::ff::{BatchInvert, Field};
 #[cfg(feature = "parallel-poly-read")]
 use maybe_rayon::{iter::ParallelIterator, prelude::ParallelSliceMut};
+
 use std::fmt::Debug;
 use std::io;
 use std::marker::PhantomData;
@@ -249,7 +250,7 @@ pub(crate) fn batch_invert_assigned<F: Field>(
 impl<F: Field> Polynomial<Assigned<F>, LagrangeCoeff> {
     pub(crate) fn invert(
         &self,
-        inv_denoms: impl Iterator<Item = F> + ExactSizeIterator,
+        inv_denoms: impl ExactSizeIterator<Item = F>,
     ) -> Polynomial<F, LagrangeCoeff> {
         assert_eq!(inv_denoms.len(), self.values.len());
         Polynomial {

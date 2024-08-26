@@ -3,11 +3,12 @@ use super::{
     strategy::Guard,
     Coeff, LagrangeCoeff, Polynomial,
 };
-use crate::poly::Error;
 use crate::transcript::{EncodedChallenge, TranscriptRead, TranscriptWrite};
+use crate::{helpers::SerdePrimeField, poly::Error};
 use ff::Field;
 use halo2curves::CurveAffine;
 use rand_core::RngCore;
+
 use std::{
     fmt::Debug,
     io::{self},
@@ -194,6 +195,26 @@ pub struct Blind<F>(pub F);
 impl<F: Field> Default for Blind<F> {
     fn default() -> Self {
         Blind(F::ONE)
+    }
+}
+
+impl<F: Field + SerdePrimeField> Blind<F> {
+    /// Writes polynomial to buffer using `SerdePrimeField::write`.  
+    pub(crate) fn write<W: io::Write>(
+        &self,
+        writer: &mut W,
+        format: crate::SerdeFormat,
+    ) -> std::io::Result<()> {
+        self.0.write(writer, format)?;
+        Ok(())
+    }
+
+    /// Reads polynomial from buffer using `SerdePrimeField::read`.
+    pub(crate) fn read<R: io::Read>(
+        reader: &mut R,
+        format: crate::SerdeFormat,
+    ) -> std::io::Result<Self> {
+        Ok(Blind(F::read(reader, format)?))
     }
 }
 

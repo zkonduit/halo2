@@ -229,7 +229,7 @@ impl<C: CurveAffine> VerifyingKey<C> {
             + self.selectors.len()
                 * (self
                     .selectors
-                    .get(0)
+                    .first()
                     .map(|selector| (selector.len() + 7) / 8)
                     .unwrap_or(0))
     }
