@@ -6,8 +6,9 @@ use crate::arithmetic::parallelize;
 use crate::helpers::SerdePrimeField;
 use crate::plonk::Assigned;
 use crate::SerdeFormat;
-
 use group::ff::{BatchInvert, Field};
+#[cfg(feature = "parallel-poly-read")]
+use maybe_rayon::{iter::ParallelIterator, prelude::ParallelSliceMut};
 use std::fmt::Debug;
 use std::io;
 use std::marker::PhantomData;
@@ -161,6 +162,33 @@ impl<F, B> Polynomial<F, B> {
 
 impl<F: SerdePrimeField, B> Polynomial<F, B> {
     /// Reads polynomial from buffer using `SerdePrimeField::read`.  
+    #[cfg(feature = "parallel-poly-read")]
+    pub(crate) fn read<R: io::Read>(reader: &mut R, format: SerdeFormat) -> io::Result<Self> {
+        let mut poly_len = [0u8; 4];
+        reader.read_exact(&mut poly_len)?;
+        let poly_len = u32::from_be_bytes(poly_len) as usize;
+
+        let repr_len = F::default().to_repr().as_ref().len();
+
+        let mut new_vals = vec![0u8; poly_len * repr_len];
+        reader.read_exact(&mut new_vals)?;
+
+        // parallel read
+        new_vals
+            .par_chunks_mut(repr_len)
+            .map(|chunk| {
+                let mut chunk = io::Cursor::new(chunk);
+                F::read(&mut chunk, format)
+            })
+            .collect::<io::Result<Vec<_>>>()
+            .map(|values| Self {
+                values,
+                _marker: PhantomData,
+            })
+    }
+
+    /// Reads polynomial from buffer using `SerdePrimeField::read`.  
+    #[cfg(not(feature = "parallel-poly-read"))]
     pub(crate) fn read<R: io::Read>(reader: &mut R, format: SerdeFormat) -> io::Result<Self> {
         let mut poly_len = [0u8; 4];
         reader.read_exact(&mut poly_len)?;

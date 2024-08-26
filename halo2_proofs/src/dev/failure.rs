@@ -1,7 +1,9 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::fmt::{self, Debug};
 
 use group::ff::Field;
+
+use rustc_hash::FxHashSet as HashSet;
 
 use super::metadata::{DebugColumn, DebugVirtualCell};
 use super::MockProver;

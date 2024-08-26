@@ -1,7 +1,7 @@
 //! Implementations of common circuit layouters.
 
+use rustc_hash::FxHashSet as HashSet;
 use std::cmp;
-use std::collections::HashSet;
 use std::fmt;
 
 use ff::Field;

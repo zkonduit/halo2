@@ -1,9 +1,12 @@
 use ff::{Field, FromUniformBytes, WithSmallOrderMulGroup};
 use group::Curve;
 use rand_core::RngCore;
-use std::collections::{BTreeSet, HashSet};
+use rustc_hash::FxBuildHasher;
+use rustc_hash::FxHashMap as HashMap;
+use rustc_hash::FxHashSet as HashSet;
+use std::collections::BTreeSet;
+use std::iter;
 use std::ops::RangeTo;
-use std::{collections::HashMap, iter};
 
 use super::{
     circuit::{
@@ -311,7 +314,9 @@ where
             };
             instances.len()
         ];
-        let mut challenges = HashMap::<usize, Scheme::Scalar>::with_capacity(meta.num_challenges);
+        let s = FxBuildHasher::default();
+        let mut challenges =
+            HashMap::<usize, Scheme::Scalar>::with_capacity_and_hasher(meta.num_challenges, s);
 
         let unusable_rows_start = params.n() as usize - (meta.blinding_factors() + 1);
         for current_phase in pk.vk.cs.phases() {

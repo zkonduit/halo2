@@ -1,8 +1,6 @@
-use std::{
-    cmp,
-    collections::{BTreeSet, HashMap},
-    ops::Range,
-};
+use std::{cmp, collections::BTreeSet, ops::Range};
+
+use rustc_hash::FxHashMap as HashMap;
 
 use super::{RegionColumn, RegionShape};
 use crate::{circuit::RegionStart, plonk::Any};

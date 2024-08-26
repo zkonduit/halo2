@@ -2,10 +2,9 @@
 
 use super::metadata::Column as ColumnMetadata;
 use crate::plonk::{self, Any};
-use std::{
-    collections::HashMap,
-    fmt::{self, Debug},
-};
+use std::fmt::{self, Debug};
+
+use rustc_hash::FxHashMap as HashMap;
 /// Metadata about a column within a circuit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Column {
