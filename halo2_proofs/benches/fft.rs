@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate criterion;
 
-use crate::arithmetic::{best_fft};
+use crate::arithmetic::best_fft;
 use group::ff::Field;
 use halo2_proofs::*;
 use halo2curves::pasta::Fp;

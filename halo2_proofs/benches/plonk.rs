@@ -312,6 +312,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     keygen_group.finish();
 
     let mut prover_group = c.benchmark_group("plonk-prover");
+    prover_group.sample_size(10);
     for k in k_range.clone() {
         let (params, pk) = keygen(k);
 
@@ -326,7 +327,6 @@ fn criterion_benchmark(c: &mut Criterion) {
     prover_group.finish();
 
     let mut verifier_group = c.benchmark_group("plonk-verifier");
-    verifier_group.sample_size(10);
     for k in k_range {
         let (params, pk) = keygen(k);
         let proof = prover(k, &params, &pk);

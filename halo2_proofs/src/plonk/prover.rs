@@ -761,11 +761,9 @@ where
     }
 
     let prover = P::new(params);
-    let res = prover
+    prover
         .create_proof(rng, transcript, instances)
-        .map_err(|_| Error::ConstraintSystemFailure);
-
-    res
+        .map_err(|_| Error::ConstraintSystemFailure)
 }
 
 #[test]
