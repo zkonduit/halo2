@@ -8,7 +8,6 @@ use std::ops::{Add, Mul, Neg, Range};
 use blake2b_simd::blake2b;
 use ff::Field;
 use ff::FromUniformBytes;
-use maybe_rayon::prelude::ParallelSliceMut;
 
 use crate::plonk::permutation::keygen::Assembly;
 use crate::{
@@ -22,7 +21,7 @@ use crate::{
 };
 
 use maybe_rayon::prelude::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator, ParallelSliceMut
 };
 
 pub mod metadata;

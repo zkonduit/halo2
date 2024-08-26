@@ -594,7 +594,6 @@ impl<C: CurveAffine> Evaluator<C> {
                 // they are actually needed.
                 let phi_coset = pk.vk.domain.coeff_to_extended(lookup.phi_poly.clone());
                 let m_coset = pk.vk.domain.coeff_to_extended(lookup.m_poly.clone());
-                
                 // Lookup constraints
                 /*
                     φ_i(X) = f_i(X) + α
@@ -643,7 +642,6 @@ impl<C: CurveAffine> Evaluator<C> {
                         let inputs_prod: C::Scalar = inputs_value
                             .iter()
                             .fold(C::Scalar::ONE, |acc, input| acc * input);
-                        
                         // f_i(X) + α at ω^idx
                         let fi_inverses = &inputs_inv_sum[n][idx];
                         let inputs_inv_sum = fi_inverses
@@ -829,7 +827,6 @@ impl<C: CurveAffine> Evaluator<C> {
                     }
                 });
             }
-
         }
         values
     }
@@ -1099,5 +1096,3 @@ pub fn evaluate<F: Field, B: Basis>(
     });
     values
 }
-
-

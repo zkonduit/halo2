@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate criterion;
 
-use crate::arithmetic::{best_fft_gpu, best_fft};
+use crate::arithmetic::{best_fft};
 use group::ff::Field;
 use halo2_proofs::*;
 use halo2curves::pasta::Fp;
@@ -16,7 +16,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             let mut a = (0..(1 << k)).map(|_| Fp::random(OsRng)).collect::<Vec<_>>();
             let omega = Fp::random(OsRng); // would be weird if this mattered
             b.iter(|| {
-                best_fft_gpu(&mut a, omega, k as u32, false);
+                best_fft(&mut a, omega, k as u32, false);
             });
         });
     }

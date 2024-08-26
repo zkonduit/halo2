@@ -10,13 +10,6 @@ use halo2curves::{
     pairing::{Engine, MillerLoopResult, MultiMillerLoop},
     CurveAffine, CurveExt,
 };
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
-use lazy_static;
-
-lazy_static::lazy_static! {
-    static ref TOTAL_DURATION_MSM: Mutex<Duration> = Mutex::new(Duration::new(0, 0));
-}
 
 /// A multiscalar multiplication in the polynomial commitment scheme
 #[derive(Clone, Default, Debug)]
@@ -85,20 +78,11 @@ where
     }
 
     fn eval(&self) -> E::G1 {
-        let start_time = Instant::now();
         use group::prime::PrimeCurveAffine;
         let mut bases = vec![E::G1Affine::identity(); self.scalars.len()];
         E::G1::batch_normalize(&self.bases, &mut bases);
-        let res = best_multiexp(&self.scalars, &bases);
 
-        let duration = start_time.elapsed();
-        let mut total_duration = TOTAL_DURATION_MSM.lock().unwrap();
-        *total_duration += duration;
-    
-        println!("Single KZG MSM: {:?}", duration);
-        println!("Total KZG MSM: {:?}", *total_duration);
-
-        res
+        best_multiexp(&self.scalars, &bases)
     }
 
     fn bases(&self) -> Vec<E::G1> {

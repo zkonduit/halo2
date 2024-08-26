@@ -76,7 +76,6 @@ tabbycat = { version = "0.1", features = ["attributes"], optional = true }
 
 # Legacy circuit compatibility
 halo2_legacy_pdqsort = { version = "0.1.0", optional = true }
-subtle = "2.6.1"
 
 [dev-dependencies]
 assert_matches = "1.5"
@@ -90,7 +89,7 @@ serde_json = "1"
 getrandom = { version = "0.2", features = ["js"] }
 
 [features]
-default = ["batch", "bits", "lazy_static"]
+default = ["batch", "bits"]
 dev-graph = ["plotters", "tabbycat"]
 test-dev-graph = ["dev-graph", "plotters/bitmap_backend", "plotters/bitmap_encoder", "plotters/ttf"]
 bits = ["halo2curves/bits"]
