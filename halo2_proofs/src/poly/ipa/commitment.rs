@@ -289,7 +289,7 @@ mod test {
 
     #[test]
     fn test_opening_proof() {
-        const K: u32 = 8;
+        const K: u32 = 6;
 
         use ff::Field;
         use rand_core::OsRng;

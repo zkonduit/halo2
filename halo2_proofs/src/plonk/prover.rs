@@ -4,6 +4,7 @@ use rand_core::RngCore;
 use std::collections::{BTreeSet, HashSet};
 use std::ops::RangeTo;
 use std::{collections::HashMap, iter};
+
 use super::{
     circuit::{
         sealed::{self},
@@ -99,8 +100,8 @@ where
         .iter()
         .map(|instance| -> Result<InstanceSingle<Scheme::Curve>, Error> {
             let instance_values = instance
-            .iter()
-            .map(|values| {
+                .iter()
+                .map(|values| {
                     let mut poly = domain.empty_lagrange();
                     assert_eq!(poly.len(), params.n() as usize);
                     if values.len() > (poly.len() - (meta.blinding_factors() + 1)) {
@@ -115,6 +116,7 @@ where
                     Ok(poly)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+
             if P::QUERY_INSTANCE {
                 let instance_commitments_projective: Vec<_> = instance_values
                     .iter()
@@ -141,12 +143,14 @@ where
                     domain.lagrange_to_coeff(lagrange_vec)
                 })
                 .collect();
+            
             Ok(InstanceSingle {
                 instance_values,
                 instance_polys,
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
+
     #[derive(Clone)]
     struct AdviceSingle<C: CurveAffine, B: Basis> {
         pub advice_polys: Vec<Polynomial<C::Scalar, B>>,
@@ -322,6 +326,7 @@ where
                     }
                 })
                 .collect::<BTreeSet<_>>();
+
             for ((circuit, advice), instances) in
                 circuits.iter().zip(advice.iter_mut()).zip(instances)
             {
@@ -362,6 +367,7 @@ where
                         })
                         .collect(),
                 );
+
                 // Add blinding factors to advice columns
                 for (column_index, advice_values) in column_indices.iter().zip(&mut advice_values) {
                     if !witness.unblinded_advice.contains(column_index) {
@@ -374,6 +380,7 @@ where
                         }
                     }
                 }
+
                 // Compute commitments to advice column polynomials
                 let blinds: Vec<_> = column_indices
                     .iter()
@@ -426,9 +433,9 @@ where
         (advice, challenges)
     };
 
-
     // Sample theta challenge for keeping lookup columns linearly independent
     let theta: ChallengeTheta<_> = transcript.squeeze_challenge_scalar();
+
     #[cfg(feature = "mv-lookup")]
     let lookups: Vec<Vec<lookup::prover::Prepared<Scheme::Curve>>> = instance
         .iter()
@@ -489,7 +496,6 @@ where
     let beta: ChallengeBeta<_> = transcript.squeeze_challenge_scalar();
     // Sample gamma challenge
     let gamma: ChallengeGamma<_> = transcript.squeeze_challenge_scalar();
-
 
     // Commit to permutations.
     let permutations: Vec<permutation::prover::Committed<Scheme::Curve>> = instance
@@ -562,11 +568,13 @@ where
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
+
     // Commit to the vanishing argument's random polynomial for blinding h(x_3)
     let vanishing = vanishing::Argument::commit(params, domain, &mut rng, transcript)?;
 
     // Obtain challenge for keeping all separate gates linearly independent
     let y: ChallengeY<_> = transcript.squeeze_challenge_scalar();
+
     // Calculate the advice polys
     let advice: Vec<AdviceSingle<Scheme::Curve, Coeff>> = advice
         .into_iter()
@@ -585,6 +593,7 @@ where
             },
         )
         .collect();
+
     // Evaluate the h(X) polynomial
     let h_poly = pk.ev.evaluate_h(
         pk,
@@ -605,6 +614,7 @@ where
         &shuffles,
         &permutations,
     );
+    
     // Construct the vanishing argument's h(X) commitments
     let vanishing = vanishing.construct(params, domain, h_poly, &mut rng, transcript)?;
     let x: ChallengeX<_> = transcript.squeeze_challenge_scalar();
@@ -696,7 +706,6 @@ where
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
-
 
     let instances = instance
         .iter()

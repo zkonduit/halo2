@@ -299,6 +299,7 @@ pub fn best_fft<Scalar: Field, G: FftGroup<Scalar>>(a: &mut [G], omega: Scalar, 
             Some(tw)
         })
         .collect();
+    
     if log_n <= log_threads {
         let mut chunk = 2_usize;
         let mut twiddle_chunk = n / 2;
