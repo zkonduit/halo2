@@ -42,7 +42,7 @@ mod tests {
 
         let input = vec![Scalar::random(OsRng); n];
 
-        let num_threads = multicore::current_num_threads();
+        let _num_threads = multicore::current_num_threads();
 
         let mut a = input.clone();
         let l_a = a.len();

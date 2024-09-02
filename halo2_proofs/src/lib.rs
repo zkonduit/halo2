@@ -2,7 +2,13 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 // The actual lints we want to disable.
-#![allow(clippy::op_ref, clippy::many_single_char_names)]
+#![allow(
+    clippy::op_ref,
+    clippy::many_single_char_names,
+    clippy::empty_docs,
+    clippy::doc_lazy_continuation,
+    clippy::single_range_in_vec_init
+)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(missing_debug_implementations)]
 #![deny(missing_docs)]

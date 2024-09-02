@@ -24,7 +24,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
             let omega = Fp::random(OsRng); // would be weird if this mattered
             b.iter(|| {
-                best_fft(&mut a, omega, k as u32, domain.get_fft_data(l_a), false);
+                best_fft(&mut a, omega, k, domain.get_fft_data(l_a), false);
             });
         });
     }

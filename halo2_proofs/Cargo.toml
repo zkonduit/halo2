@@ -113,6 +113,7 @@ cost-estimator = ["serde_derive"]
 derive_serde = ["halo2curves/derive_serde"]
 parallel-poly-read = []
 precompute-coset = []
+multicore = []
 
 [lib]
 bench = false

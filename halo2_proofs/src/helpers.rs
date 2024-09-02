@@ -89,7 +89,7 @@ pub trait SerdePrimeField: PrimeField + SerdeObject {
 
     /// Writes a field element as bytes to the buffer according to the `format`:
     /// - `Processed`: Writes a field element in standard form, with endianness specified by the
-    /// `PrimeField` implementation.
+    ///  `PrimeField` implementation.
     /// - Otherwise: Writes a field element into raw bytes in its internal Montgomery representation,
     /// WITHOUT performing the expensive Montgomery reduction.
     fn write<W: io::Write>(&self, writer: &mut W, format: SerdeFormat) -> io::Result<()> {
