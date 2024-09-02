@@ -1,3 +1,1 @@
-[toolchain]
-channel = "nightly-2024-07-18"
-components = ["rustfmt", "clippy"]
+"nightly-2024-07-18"
