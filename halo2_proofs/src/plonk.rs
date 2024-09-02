@@ -25,7 +25,9 @@ mod circuit;
 mod error;
 mod evaluation;
 mod keygen;
+#[cfg(not(feature = "mv-lookup"))]
 mod lookup;
+#[cfg(feature = "mv-lookup")]
 mod mv_lookup;
 pub mod permutation;
 mod shuffle;

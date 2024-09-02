@@ -22,8 +22,10 @@ use crate::{
 
 use maybe_rayon::prelude::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
-    ParallelSliceMut,
 };
+
+#[cfg(not(feature = "mv-lookup"))]
+use maybe_rayon::prelude::ParallelSliceMut;
 
 pub mod metadata;
 use metadata::Column as ColumnMetadata;
