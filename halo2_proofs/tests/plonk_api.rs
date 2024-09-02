@@ -27,6 +27,7 @@ fn plonk_api() {
 
     /// This represents an advice column at a certain row in the ConstraintSystem
     #[derive(Copy, Clone, Debug)]
+    #[allow(dead_code)]
     pub struct Variable(Column<Advice>, usize);
 
     #[derive(Clone)]
@@ -459,7 +460,7 @@ fn plonk_api() {
         Scheme: CommitmentScheme,
         P: Prover<'params, Scheme>,
         E: EncodedChallenge<Scheme::Curve>,
-        R: RngCore,
+        R: RngCore + Send + Sync,
         T: TranscriptWriterBuffer<Vec<u8>, Scheme::Curve, E>,
     >(
         rng: R,
@@ -468,6 +469,8 @@ fn plonk_api() {
     ) -> Vec<u8>
     where
         Scheme::Scalar: Ord + WithSmallOrderMulGroup<3> + FromUniformBytes<64>,
+        Scheme::Curve: Send + Sync,
+        Scheme::ParamsProver: Send + Sync,
     {
         let (a, instance, lookup_table) = common!(Scheme);
 

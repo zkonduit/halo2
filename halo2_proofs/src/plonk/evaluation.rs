@@ -15,6 +15,7 @@ use crate::{
 };
 
 use group::ff::{Field, PrimeField, WithSmallOrderMulGroup};
+#[cfg(feature = "mv-lookup")]
 use maybe_rayon::iter::IndexedParallelIterator;
 use maybe_rayon::iter::IntoParallelRefIterator;
 use maybe_rayon::iter::ParallelIterator;

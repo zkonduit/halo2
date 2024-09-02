@@ -43,6 +43,7 @@ pub(in crate::plonk) struct Committed<C: CurveAffine> {
 }
 
 impl<C: SerdeCurveAffine> Committed<C> {
+    #[allow(dead_code)]
     pub fn write<W: std::io::Write>(
         &self,
         writer: &mut W,
@@ -56,6 +57,7 @@ impl<C: SerdeCurveAffine> Committed<C> {
         self.commitment.write(writer, format)
     }
 
+    #[allow(dead_code)]
     pub fn read<R: std::io::Read>(reader: &mut R, format: SerdeFormat) -> std::io::Result<Self>
     where
         <C as CurveAffine>::ScalarExt: crate::helpers::SerdePrimeField,

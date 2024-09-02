@@ -1,7 +1,5 @@
 use ff::{Field, FromUniformBytes, WithSmallOrderMulGroup};
 use group::Curve;
-use halo2curves::serde::SerdeObject;
-
 use instant::Instant;
 use rand_core::RngCore;
 use rustc_hash::FxBuildHasher;
@@ -20,8 +18,8 @@ use super::{
     permutation, shuffle, vanishing, ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX,
     ChallengeY, Error, ProvingKey,
 };
-use maybe_rayon::iter::IndexedParallelIterator;
-use maybe_rayon::iter::ParallelIterator;
+#[cfg(feature = "mv-lookup")]
+use maybe_rayon::iter::{IndexedParallelIterator, ParallelIterator};
 
 #[cfg(not(feature = "mv-lookup"))]
 use super::lookup;
@@ -29,9 +27,7 @@ use super::lookup;
 use super::mv_lookup as lookup;
 
 #[cfg(feature = "mv-lookup")]
-use maybe_rayon::iter::{
-    IntoParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
-};
+use maybe_rayon::iter::{IntoParallelIterator, IntoParallelRefIterator};
 
 use crate::{
     arithmetic::{eval_polynomial, CurveAffine},
@@ -69,8 +65,7 @@ pub fn create_proof<
     transcript: &mut T,
 ) -> Result<(), Error>
 where
-    Scheme::Scalar: WithSmallOrderMulGroup<3> + FromUniformBytes<64> + SerdeObject,
-    Scheme::Curve: SerdeObject,
+    Scheme::Scalar: WithSmallOrderMulGroup<3> + FromUniformBytes<64>,
     Scheme::ParamsProver: Send + Sync,
 {
     #[cfg(feature = "counter")]
@@ -498,11 +493,13 @@ where
         .collect::<Result<Vec<_>, _>>()?;
 
     #[cfg(feature = "mv-lookup")]
-    lookups.iter().for_each(|lookups| {
-        lookups.iter().for_each(|lookup| {
-            transcript.write_point(lookup.commitment);
-        });
-    });
+    {
+        for lookups_ in &lookups {
+            for lookup in lookups_.iter() {
+                transcript.write_point(lookup.commitment)?;
+            }
+        }
+    }
 
     #[cfg(not(feature = "mv-lookup"))]
     let lookups: Vec<Vec<lookup::prover::Permuted<Scheme::Curve>>> = instance
@@ -603,11 +600,13 @@ where
     let lookups = commit_lookups()?;
 
     #[cfg(feature = "mv-lookup")]
-    lookups.iter().for_each(|lookups| {
-        lookups.iter().for_each(|lookup| {
-            transcript.write_point(lookup.commitment);
-        });
-    });
+    {
+        for lookups_ in &lookups {
+            for lookup in lookups_.iter() {
+                transcript.write_point(lookup.commitment)?;
+            }
+        }
+    }
 
     log::trace!("Lookup commitment: {:?}", start.elapsed());
 

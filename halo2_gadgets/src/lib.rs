@@ -16,7 +16,7 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 // Temporary until we have more of the crate implemented.
-#![allow(dead_code)]
+#![allow(dead_code, clippy::single_range_in_vec_init)]
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(missing_debug_implementations)]

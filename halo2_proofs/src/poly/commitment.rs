@@ -199,7 +199,8 @@ impl<F: Field> Default for Blind<F> {
 }
 
 impl<F: Field + SerdePrimeField> Blind<F> {
-    /// Writes polynomial to buffer using `SerdePrimeField::write`.  
+    /// Writes blind to buffer using `SerdePrimeField::write`.  
+    #[allow(dead_code)]
     pub(crate) fn write<W: io::Write>(
         &self,
         writer: &mut W,
@@ -209,7 +210,8 @@ impl<F: Field + SerdePrimeField> Blind<F> {
         Ok(())
     }
 
-    /// Reads polynomial from buffer using `SerdePrimeField::read`.
+    /// Reads blind from buffer using `SerdePrimeField::read`.
+    #[allow(dead_code)]
     pub(crate) fn read<R: io::Read>(
         reader: &mut R,
         format: crate::SerdeFormat,

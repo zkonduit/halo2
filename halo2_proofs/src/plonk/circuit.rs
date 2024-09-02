@@ -1374,11 +1374,6 @@ impl<F: Field> Product<Self> for Expression<F> {
     }
 }
 
-/// Represents an index into a vector where each entry corresponds to a distinct
-/// point that polynomials are queried at.
-#[derive(Copy, Clone, Debug)]
-pub(crate) struct PointIndex(pub usize);
-
 /// A "virtual cell" is a PLONK cell that has been queried at a particular relative offset
 /// within a custom gate.
 #[derive(Clone, Debug)]
@@ -1554,6 +1549,7 @@ impl<F: Field> Gate<F> {
 
 /// TODO doc
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct LookupTracker<F: Field> {
     pub(crate) table: Vec<Expression<F>>,
     pub(crate) inputs: Vec<Vec<Expression<F>>>,
