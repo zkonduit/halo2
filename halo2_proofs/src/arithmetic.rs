@@ -3,6 +3,8 @@
 
 #[cfg(feature = "icicle_gpu")]
 use super::icicle;
+#[cfg(feature = "icicle_gpu")]
+use std::env;
 use super::multicore;
 pub use ff::Field;
 use group::{
@@ -10,8 +12,6 @@ use group::{
     prime::PrimeCurveAffine,
     Curve, GroupOpsOwned, ScalarMulOwned,
 };
-#[cfg(feature = "icicle_gpu")]
-use rustacuda::prelude::DeviceBuffer;
 
 use halo2curves::msm::msm_best;
 pub use halo2curves::{CurveAffine, CurveExt};
@@ -31,6 +31,24 @@ where
 {
 }
 
+/// Best MSM
+pub fn best_multiexp<C: CurveAffine>(
+    coeffs: &[C::Scalar], bases: &[C]
+) -> C::Curve {
+    #[cfg(feature = "icicle_gpu")]
+    if env::var("ENABLE_ICICLE_GPU").is_ok()
+        && !icicle::should_use_cpu_msm(coeffs.len())
+        && icicle::is_gpu_supported_field(&coeffs[0])
+    {
+        best_multiexp_gpu(coeffs, bases)
+    } else {
+        best_multiexp_cpu(coeffs, bases)
+    }
+
+    #[cfg(not(feature = "icicle_gpu"))]
+    best_multiexp_cpu(coeffs, bases)
+}
+
 // [JPW] Keep this adapter to halo2curves to minimize code changes.
 /// Performs a multi-exponentiation operation.
 ///
@@ -43,15 +61,12 @@ pub fn best_multiexp_cpu<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C
 
 #[cfg(feature = "icicle_gpu")]
 /// Performs a multi-exponentiation operation on GPU using Icicle library
-pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], is_lagrange: bool) -> C::Curve {
-    let scalars_ptr: DeviceBuffer<::icicle::curves::bn254::ScalarField_BN254> =
-        icicle::copy_scalars_to_device::<C>(coeffs);
-
-    return icicle::multiexp_on_device::<C>(scalars_ptr, is_lagrange);
+pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], g: &[C]) -> C::Curve {
+    icicle::multiexp_on_device::<C>(coeffs, g)
 }
 
 /// Dispatcher
-pub fn best_fft<Scalar: Field, G: FftGroup<Scalar>>(
+pub fn best_fft_cpu<Scalar: Field, G: FftGroup<Scalar>>(
     a: &mut [G],
     omega: Scalar,
     log_n: u32,
@@ -59,6 +74,40 @@ pub fn best_fft<Scalar: Field, G: FftGroup<Scalar>>(
     inverse: bool,
 ) {
     fft::fft(a, omega, log_n, data, inverse);
+}
+
+/// Best FFT
+pub fn best_fft<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeField>(
+    scalars: &mut [G],
+    omega: Scalar,
+    log_n: u32,
+    data: &FFTData<Scalar>,
+    inverse: bool,
+) {
+    #[cfg(feature = "icicle_gpu")]
+    if env::var("ENABLE_ICICLE_GPU").is_ok()
+        && !icicle::should_use_cpu_fft(scalars.len())
+        && icicle::is_gpu_supported_field(&omega)
+    {
+        best_fft_gpu(scalars, omega, log_n, inverse);
+    } else {
+        best_fft_cpu(scalars, omega, log_n, data, inverse);
+    }
+
+    #[cfg(not(feature = "icicle_gpu"))]
+    best_fft_cpu(scalars, omega, log_n, data, inverse);
+}
+
+/// Performs a NTT operation on GPU using Icicle library
+#[cfg(feature = "icicle_gpu")]
+pub fn best_fft_gpu<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeField>(
+    a: &mut [G],
+    omega: Scalar,
+    log_n: u32,
+    inverse: bool,
+) {
+    println!("icicle_fft");
+    icicle::fft_on_device::<Scalar, G>(a, omega, log_n, inverse);
 }
 
 /// Convert coefficient bases group elements to lagrange basis by inverse FFT.
@@ -74,7 +123,7 @@ pub fn g_to_lagrange<C: PrimeCurveAffine>(g_projective: Vec<C::Curve>, k: u32) -
     let n = g_lagrange_projective.len();
     let fft_data = FFTData::new(n, omega, omega_inv);
 
-    best_fft(&mut g_lagrange_projective, omega_inv, k, &fft_data, true);
+    best_fft_cpu(&mut g_lagrange_projective, omega_inv, k, &fft_data, true);
     parallelize(&mut g_lagrange_projective, |g, _| {
         for g in g.iter_mut() {
             *g *= n_inv;

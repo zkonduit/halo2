@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate criterion;
 
-use crate::arithmetic::best_multiexp_cpu;
+use crate::arithmetic::best_multiexp;
 use crate::halo2curves::pasta::{EqAffine, Fp};
 use group::ff::Field;
 use halo2_proofs::*;
@@ -27,7 +27,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         c.bench_function("double-and-add", |b| {
             b.iter(|| {
                 for (g_lo, g_hi) in g_lo.iter().zip(g_hi.iter()) {
-                    best_multiexp_cpu(&[black_box(coeff_1), black_box(coeff_2)], &[*g_lo, *g_hi]);
+                    best_multiexp(&[black_box(coeff_1), black_box(coeff_2)], &[*g_lo, *g_hi]);
                 }
             })
         });
