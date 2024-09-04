@@ -1,4 +1,4 @@
-use crate::arithmetic::{best_multiexp_cpu, CurveAffine};
+use crate::arithmetic::{best_multiexp, CurveAffine};
 use crate::poly::{commitment::MSM, ipa::commitment::ParamsVerifierIPA};
 use ff::Field;
 use group::Group;
@@ -166,7 +166,7 @@ impl<'a, C: CurveAffine> MSM<C> for MSMIPA<'a, C> {
 
         assert_eq!(scalars.len(), len);
 
-        best_multiexp_cpu(&scalars, &bases)
+        best_multiexp(&scalars, &bases)
     }
 
     fn bases(&self) -> Vec<C::CurveExt> {
