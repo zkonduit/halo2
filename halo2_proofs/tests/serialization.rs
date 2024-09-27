@@ -8,7 +8,7 @@ use halo2_debug::test_rng;
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::{
-        create_proof, keygen_pk, keygen_vk_custom, pk_read, verify_proof, vk_read, Advice, Circuit,
+        create_proof, keygen_pk, keygen_vk_custom, pk_read, verify_proof_multi, vk_read, Advice, Circuit,
         Column, ConstraintSystem, ErrorFront, Fixed, Instance,
     },
     poly::{
@@ -205,22 +205,22 @@ fn test_serialization() {
             let proof = transcript.finalize();
 
             let verifier_params = params.verifier_params();
-            let strategy = SingleStrategy::new(&verifier_params);
             let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-            assert!(verify_proof::<
-                KZGCommitmentScheme<Bn256>,
-                VerifierGWC<Bn256>,
-                Challenge255<G1Affine>,
-                Blake2bRead<&[u8], G1Affine, Challenge255<G1Affine>>,
-                SingleStrategy<Bn256>,
-            >(
-                &verifier_params,
-                &vk,
-                strategy,
-                instances.as_slice(),
-                &mut transcript
-            )
-            .is_ok());
+            assert!(
+                verify_proof_multi::<
+                    KZGCommitmentScheme<Bn256>,
+                    VerifierGWC<Bn256>,
+                    Challenge255<G1Affine>,
+                    Blake2bRead<&[u8], G1Affine, Challenge255<G1Affine>>,
+                    SingleStrategy<Bn256>,
+                >(
+                    &verifier_params,
+                    &vk,
+                    instances.as_slice(),
+                    &mut transcript
+                ),
+                "failed to verify proof"
+            );
 
             proof
         },
