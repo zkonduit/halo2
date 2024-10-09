@@ -2,8 +2,8 @@ use std::marker::PhantomData;
 
 use crate::arithmetic::CurveAffine;
 
-mod prover;
-mod verifier;
+pub(crate) mod prover;
+pub(crate) mod verifier;
 
 /// A vanishing argument.
 pub(crate) struct Argument<C: CurveAffine> {
