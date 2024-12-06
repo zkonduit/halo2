@@ -2,7 +2,7 @@ use super::commitment::{IPACommitmentScheme, ParamsIPA};
 use super::msm::MSMIPA;
 use super::multiopen::VerifierIPA;
 use crate::{
-    arithmetic::best_multiexp_cpu,
+    arithmetic::best_multiexp,
     plonk::Error,
     poly::{
         commitment::MSM,
@@ -67,7 +67,7 @@ impl<'params, C: CurveAffine> GuardIPA<'params, C> {
     pub fn compute_g(&self) -> C {
         let s = compute_s(&self.u, C::Scalar::ONE);
 
-        best_multiexp_cpu(&s, &self.msm.params.g).to_affine()
+        best_multiexp(&s, &self.msm.params.g).to_affine()
     }
 }
 
