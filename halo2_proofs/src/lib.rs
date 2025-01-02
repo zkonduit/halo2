@@ -46,6 +46,7 @@ pub mod transcript;
 pub mod dev;
 mod helpers;
 pub use helpers::SerdeFormat;
+pub use helpers::SerdePrimeField;
 
 #[cfg(feature = "icicle_gpu")]
 #[allow(unsafe_code)]

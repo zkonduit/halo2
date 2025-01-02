@@ -8,7 +8,8 @@ use crate::plonk::Assigned;
 use crate::SerdeFormat;
 use group::ff::{BatchInvert, Field};
 #[cfg(feature = "parallel-poly-read")]
-use maybe_rayon::{iter::ParallelIterator, prelude::ParallelSliceMut};
+use maybe_rayon::{iter::ParallelIterator, prelude::ParallelSlice};
+use rand_core::RngCore;
 
 use std::fmt::Debug;
 use std::io;
@@ -162,35 +163,50 @@ impl<F, B> Polynomial<F, B> {
 }
 
 impl<F: SerdePrimeField, B> Polynomial<F, B> {
+    /// create a random polynomial with `num_coeffs` coefficients
+    pub fn random<R: RngCore>(num_coeffs: usize, rng: &mut R) -> Self {
+        Polynomial {
+            values: (0..num_coeffs).map(|_| F::random(&mut *rng)).collect(),
+            _marker: PhantomData,
+        }
+    }
+
     /// Reads polynomial from buffer using `SerdePrimeField::read`.  
     #[cfg(feature = "parallel-poly-read")]
-    pub(crate) fn read<R: io::Read>(reader: &mut R, format: SerdeFormat) -> io::Result<Self> {
-        let mut poly_len = [0u8; 4];
-        reader.read_exact(&mut poly_len)?;
-        let poly_len = u32::from_be_bytes(poly_len) as usize;
+    pub fn read<R: io::Read>(reader: &mut R, format: SerdeFormat) -> io::Result<Self> {
+        const BATCH_SIZE: usize = 1024; // Adjusted based on testing
+
+        let poly_len = u32::from_be_bytes({
+            let mut buf = [0u8; 4];
+            reader.read_exact(&mut buf)?;
+            buf
+        }) as usize;
 
         let repr_len = F::default().to_repr().as_ref().len();
+        let buffer = {
+            let mut buf = vec![0u8; poly_len * repr_len];
+            reader.read_exact(&mut buf)?;
+            buf
+        };
 
-        let mut new_vals = vec![0u8; poly_len * repr_len];
-        reader.read_exact(&mut new_vals)?;
-
-        // parallel read
-        new_vals
-            .par_chunks_mut(repr_len)
-            .map(|chunk| {
-                let mut chunk = io::Cursor::new(chunk);
-                F::read(&mut chunk, format)
+        buffer
+            .par_chunks(repr_len * BATCH_SIZE)
+            .map(|batch| {
+                batch
+                    .chunks(repr_len)
+                    .map(|chunk| F::read(&mut io::Cursor::new(chunk), format))
+                    .collect::<io::Result<Vec<_>>>()
             })
-            .collect::<io::Result<Vec<_>>>()
+            .collect::<Result<Vec<_>, _>>()
             .map(|values| Self {
-                values,
+                values: values.into_iter().flatten().collect(),
                 _marker: PhantomData,
             })
     }
 
     /// Reads polynomial from buffer using `SerdePrimeField::read`.  
     #[cfg(not(feature = "parallel-poly-read"))]
-    pub(crate) fn read<R: io::Read>(reader: &mut R, format: SerdeFormat) -> io::Result<Self> {
+    pub fn read<R: io::Read>(reader: &mut R, format: SerdeFormat) -> io::Result<Self> {
         let mut poly_len = [0u8; 4];
         reader.read_exact(&mut poly_len)?;
         let poly_len = u32::from_be_bytes(poly_len);
@@ -205,11 +221,7 @@ impl<F: SerdePrimeField, B> Polynomial<F, B> {
     }
 
     /// Writes polynomial to buffer using `SerdePrimeField::write`.  
-    pub(crate) fn write<W: io::Write>(
-        &self,
-        writer: &mut W,
-        format: SerdeFormat,
-    ) -> io::Result<()> {
+    pub fn write<W: io::Write>(&self, writer: &mut W, format: SerdeFormat) -> io::Result<()> {
         writer.write_all(&(self.values.len() as u32).to_be_bytes())?;
         for value in self.values.iter() {
             value.write(writer, format)?;

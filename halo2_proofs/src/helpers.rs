@@ -66,6 +66,7 @@ pub trait SerdeCurveAffine: CurveAffine + SerdeObject {
 }
 impl<C: CurveAffine + SerdeObject> SerdeCurveAffine for C {}
 
+///
 pub trait SerdePrimeField: PrimeField + SerdeObject {
     /// Reads a field element as bytes from the buffer according to the `format`:
     /// - `Processed`: Reads a field element in standard form, with endianness specified by the
