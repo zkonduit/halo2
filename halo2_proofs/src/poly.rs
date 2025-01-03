@@ -173,9 +173,7 @@ impl<F: SerdePrimeField, B> Polynomial<F, B> {
 
     /// Reads polynomial from buffer using `SerdePrimeField::read`.  
     #[cfg(feature = "parallel-poly-read")]
-    pub fn read<R: io::Read>(reader: &mut R, format: SerdeFormat) -> io::Result<Self> {
-        const BATCH_SIZE: usize = 1024; // Adjusted based on testing
-
+    pub(crate) fn read<R: io::Read>(reader: &mut R, format: SerdeFormat) -> io::Result<Self> {
         let poly_len = u32::from_be_bytes({
             let mut buf = [0u8; 4];
             reader.read_exact(&mut buf)?;
@@ -183,23 +181,19 @@ impl<F: SerdePrimeField, B> Polynomial<F, B> {
         }) as usize;
 
         let repr_len = F::default().to_repr().as_ref().len();
-        let buffer = {
-            let mut buf = vec![0u8; poly_len * repr_len];
-            reader.read_exact(&mut buf)?;
-            buf
-        };
 
+        // Preallocate both buffers at once
+        let mut buffer = vec![0u8; poly_len * repr_len];
+
+        reader.read_exact(&mut buffer)?;
+
+        // Use par_bridge() for better workload distribution
         buffer
-            .par_chunks(repr_len * BATCH_SIZE)
-            .map(|batch| {
-                batch
-                    .chunks(repr_len)
-                    .map(|chunk| F::read(&mut io::Cursor::new(chunk), format))
-                    .collect::<io::Result<Vec<_>>>()
-            })
-            .collect::<Result<Vec<_>, _>>()
+            .par_chunks_exact(repr_len)
+            .map(|chunk| F::read(&mut io::Cursor::new(chunk), format))
+            .collect::<io::Result<Vec<_>>>()
             .map(|values| Self {
-                values: values.into_iter().flatten().collect(),
+                values,
                 _marker: PhantomData,
             })
     }
