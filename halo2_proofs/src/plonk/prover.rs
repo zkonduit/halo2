@@ -466,6 +466,10 @@ where
     log::trace!("Theta challenge: {:?}", start.elapsed());
 
     let start = Instant::now();
+
+    #[cfg(feature = "mv-lookup")]
+    let blind = Blind(Scheme::Scalar::random(&mut rng));
+
     #[cfg(feature = "mv-lookup")]
     let lookups: Vec<Vec<lookup::prover::Prepared<Scheme::Curve>>> = instance
         .par_iter()
@@ -486,6 +490,7 @@ where
                         &pk.fixed_values,
                         &instance.instance_values,
                         &challenges,
+                        &blind,
                     )
                 })
                 .collect()
@@ -565,6 +570,13 @@ where
     // preallocate the lookups
 
     #[cfg(feature = "mv-lookup")]
+    let phi_blinds = (0..pk.vk.cs.blinding_factors())
+        .map(|_| Scheme::Scalar::random(&mut rng))
+        .collect::<Vec<_>>();
+    #[cfg(feature = "mv-lookup")]
+    let grand_sum_blind = Blind(Scheme::Scalar::random(&mut rng));
+
+    #[cfg(feature = "mv-lookup")]
     let commit_lookups = || -> Result<Vec<Vec<lookup::prover::Committed<Scheme::Curve>>>, _> {
         lookups
             .into_iter()
@@ -572,7 +584,9 @@ where
                 // Construct and commit to products for each lookup
                 let res = lookups
                     .into_par_iter()
-                    .map(|lookup| lookup.commit_grand_sum(&pk.vk, params, beta))
+                    .map(|lookup| {
+                        lookup.commit_grand_sum(&pk.vk, params, beta, &phi_blinds, &grand_sum_blind)
+                    })
                     .collect::<Result<Vec<_>, _>>();
 
                 res
