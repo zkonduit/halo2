@@ -88,7 +88,6 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
         fixed_values: &'a [Polynomial<C::Scalar, LagrangeCoeff>],
         instance_values: &'a [Polynomial<C::Scalar, LagrangeCoeff>],
         challenges: &'a [C::Scalar],
-        blind: &'a Blind<C::Scalar>,
     ) -> Result<Prepared<C>, Error>
     where
         C: CurveAffine<ScalarExt = F>,
@@ -219,6 +218,7 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
         }
 
         // commit to m(X)
+        let blind = Blind(C::Scalar::ZERO);
         let start = instant::Instant::now();
         let m_commitment = params.commit_lagrange(&m_values, blind.clone()).to_affine();
         log::trace!("m_commitment {:?}", start.elapsed());
@@ -242,7 +242,6 @@ impl<C: CurveAffine> Prepared<C> {
         params: &P,
         beta: ChallengeBeta<C>,
         phi_blinds: &[C::Scalar],
-        grand_sum_blind: &Blind<C::Scalar>,
     ) -> Result<Committed<C>, Error> {
         /*
             φ_i(X) = f_i(X) + α
@@ -405,6 +404,7 @@ impl<C: CurveAffine> Prepared<C> {
             assert_eq!(phi[u], C::Scalar::ZERO);
         }
 
+        let grand_sum_blind = Blind(C::Scalar::ZERO);
         let start = instant::Instant::now();
         let phi_commitment = params
             .commit_lagrange(&phi, grand_sum_blind.clone())
