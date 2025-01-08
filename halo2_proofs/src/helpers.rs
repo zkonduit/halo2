@@ -167,8 +167,6 @@ pub(crate) fn read_polynomial_vec<R: io::Read, F: SerdePrimeField, B: std::marke
         poly_lens.push(u32::from_be_bytes(poly_len));
     }
 
-    println!("poly_lens {:?}", poly_lens);
-
     // Pre-read all polynomial data into separate buffers
     let mut poly_buffers = Vec::with_capacity(len as usize);
     for &poly_len in &poly_lens {
