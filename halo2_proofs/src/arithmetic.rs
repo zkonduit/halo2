@@ -32,20 +32,38 @@ where
 }
 
 /// Best MSM
-pub fn best_multiexp<C: CurveAffine>(
-    coeffs: &[C::Scalar], bases: &[C]
-) -> C::Curve {
+pub fn best_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
     #[cfg(feature = "icicle_gpu")]
     if env::var("ENABLE_ICICLE_GPU").is_ok()
         && !icicle::should_use_cpu_msm(coeffs.len())
         && icicle::is_gpu_supported_field(&coeffs[0])
     {
-        best_multiexp_gpu(coeffs, bases)
-    } else {
-        best_multiexp_cpu(coeffs, bases)
+        return best_multiexp_gpu(coeffs, bases);
     }
 
-    #[cfg(not(feature = "icicle_gpu"))]
+    #[cfg(feature = "metal")]
+    {
+        use mopro_msm::metal::abstraction::limbs_conversion::h2c::{H2Fr, H2GAffine, H2G};
+        use std::sync::Once;
+
+        // Static mutex to block concurrent Metal acceleration calls
+        static PRINT_ONCE: Once = Once::new();
+
+        // Print the warning message only once
+        PRINT_ONCE.call_once(|| {
+            log::warn!(
+                "WARNING: Using Experimental Metal Acceleration for MSM. \
+                 Best performance improvements are observed with log row size >= 20. \
+                 Current log size: {}",
+                coeffs.len().ilog2()
+            );
+        });
+
+        // Perform MSM using Metal acceleration
+        return mopro_msm::metal::msm_best::<C, H2GAffine, H2G, H2Fr>(coeffs, bases);
+    }
+
+    #[allow(unreachable_code)]
     best_multiexp_cpu(coeffs, bases)
 }
 
@@ -56,25 +74,6 @@ pub fn best_multiexp<C: CurveAffine>(
 ///
 /// This will use multithreading if beneficial.
 pub fn best_multiexp_cpu<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
-    #[cfg(feature = "metal")]
-    if coeffs.len() >= 2_usize.pow(17) {
-        static PRINT_ONCE: Once = Once::new();
-
-        PRINT_ONCE.call_once(|| {
-            log::warn!(
-                "WARNING: Using Experimental Metal Acceleration for MSM. \
-                 Best performance improvements are observed with log row size >= 20. \
-                 Current log size: {}",
-                coeffs.len().ilog2()
-            );
-        });
-
-        use mopro_msm::metal::abstraction::limbs_conversion::h2c::{H2GAffine, H2G, H2Fr};
-        mopro_msm::metal::msm_best::<C, H2GAffine, H2G, H2Fr>(coeffs, bases)
-    } else {
-        msm_best(coeffs, bases)
-    }
-    #[cfg(not(feature = "metal"))]
     msm_best(coeffs, bases)
 }
 
