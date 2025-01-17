@@ -66,6 +66,7 @@ pub trait SerdeCurveAffine: CurveAffine + SerdeObject {
 }
 impl<C: CurveAffine + SerdeObject> SerdeCurveAffine for C {}
 
+///
 pub trait SerdePrimeField: PrimeField + SerdeObject {
     /// Reads a field element as bytes from the buffer according to the `format`:
     /// - `Processed`: Reads a field element in standard form, with endianness specified by the
@@ -120,6 +121,7 @@ pub fn unpack(byte: u8, bits: &mut [bool]) {
     }
 }
 
+#[cfg(not(feature = "parallel-poly-read"))]
 /// Reads a vector of polynomials from buffer
 pub(crate) fn read_polynomial_vec<R: io::Read, F: SerdePrimeField, B>(
     reader: &mut R,
@@ -129,8 +131,60 @@ pub(crate) fn read_polynomial_vec<R: io::Read, F: SerdePrimeField, B>(
     reader.read_exact(&mut len)?;
     let len = u32::from_be_bytes(len);
 
+    let poly_lens: Result<Vec<_>, _> = (0..len)
+        .map(|_| {
+            let mut poly_len = [0u8; 4];
+            reader.read_exact(&mut poly_len)?;
+            Ok::<_, std::io::Error>(u32::from_be_bytes(poly_len))
+        })
+        .collect();
+
+    let _poly_lens = poly_lens?;
+
     (0..len)
         .map(|_| Polynomial::<F, B>::read(reader, format))
+        .collect::<io::Result<Vec<_>>>()
+}
+
+#[cfg(feature = "parallel-poly-read")]
+/// Reads a vector of polynomials from buffer
+pub(crate) fn read_polynomial_vec<R: io::Read, F: SerdePrimeField, B: std::marker::Send>(
+    reader: &mut R,
+    format: SerdeFormat,
+) -> io::Result<Vec<Polynomial<F, B>>> {
+    use maybe_rayon::iter::IntoParallelIterator;
+    use maybe_rayon::iter::ParallelIterator;
+
+    let mut len = [0u8; 4];
+    reader.read_exact(&mut len)?;
+    let len = u32::from_be_bytes(len);
+
+    // Read all polynomial lengths first
+    let mut poly_lens = Vec::with_capacity(len as usize);
+    for _ in 0..len {
+        let mut poly_len = [0u8; 4];
+        reader.read_exact(&mut poly_len)?;
+        poly_lens.push(u32::from_be_bytes(poly_len));
+    }
+
+    // Pre-read all polynomial data into separate buffers
+    let mut poly_buffers = Vec::with_capacity(len as usize);
+    for &poly_len in &poly_lens {
+        let repr_len = F::default().to_repr().as_ref().len();
+        // sum of all the Field elements AND also the prepended u32 bytes
+        let buffer_size = repr_len * poly_len as usize + std::mem::size_of::<u32>();
+        let mut buffer = vec![0u8; buffer_size];
+        reader.read_exact(&mut buffer)?;
+        poly_buffers.push(buffer);
+    }
+
+    // Process buffers in parallel
+    poly_buffers
+        .into_par_iter()
+        .map(|buffer| {
+            let mut cursor = std::io::Cursor::new(buffer);
+            Polynomial::<F, B>::read_serial(&mut cursor, format)
+        })
         .collect::<io::Result<Vec<_>>>()
 }
 
@@ -141,6 +195,11 @@ pub(crate) fn write_polynomial_slice<W: io::Write, F: SerdePrimeField, B>(
     format: SerdeFormat,
 ) -> io::Result<()> {
     writer.write_all(&(slice.len() as u32).to_be_bytes())?;
+    // then write each polynomial's len
+    for poly in slice.iter() {
+        writer.write_all(&(poly.num_coeffs() as u32).to_be_bytes())?;
+    }
+
     for poly in slice.iter() {
         poly.write(writer, format)?;
     }
@@ -150,5 +209,6 @@ pub(crate) fn write_polynomial_slice<W: io::Write, F: SerdePrimeField, B>(
 /// Gets the total number of bytes of a slice of polynomials, assuming all polynomials are the same length
 pub(crate) fn polynomial_slice_byte_length<F: PrimeField, B>(slice: &[Polynomial<F, B>]) -> usize {
     let field_len = F::default().to_repr().as_ref().len();
-    4 + slice.len() * (4 + field_len * slice.first().map(|poly| poly.len()).unwrap_or(0))
+    4 + 4 * slice.len()
+        + slice.len() * (4 + field_len * slice.first().map(|poly| poly.len()).unwrap_or(0))
 }

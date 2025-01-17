@@ -20,12 +20,11 @@ use group::{
 };
 use rustc_hash::FxHashMap as HashMap;
 
+use maybe_rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{
     iter,
     ops::{Mul, MulAssign},
 };
-
-use maybe_rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 #[derive(Debug)]
 pub(in crate::plonk) struct Prepared<C: CurveAffine> {
@@ -219,9 +218,9 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
         }
 
         // commit to m(X)
-        let start = instant::Instant::now();
         let blind = Blind(C::Scalar::ZERO);
-        let m_commitment = params.commit_lagrange(&m_values, blind).to_affine();
+        let start = instant::Instant::now();
+        let m_commitment = params.commit_lagrange(&m_values, blind.clone()).to_affine();
         log::trace!("m_commitment {:?}", start.elapsed());
 
         // write commitment of m(X) to transcript
@@ -242,6 +241,7 @@ impl<C: CurveAffine> Prepared<C> {
         vk: &VerifyingKey<C>,
         params: &P,
         beta: ChallengeBeta<C>,
+        phi_blinds: &[C::Scalar],
     ) -> Result<Committed<C>, Error> {
         /*
             φ_i(X) = f_i(X) + α
@@ -322,6 +322,12 @@ impl<C: CurveAffine> Prepared<C> {
         // Compute the evaluations of the lookup grand sum polynomial
         // over our domain, starting with phi[0] = 0
         let blinding_factors = vk.cs.blinding_factors();
+
+        assert!(
+            phi_blinds.len() == blinding_factors,
+            "invalid number of blinding factors"
+        );
+
         let phi = iter::once(C::Scalar::ZERO)
             .chain(log_derivatives_diff)
             .scan(C::Scalar::ZERO, |state, cur| {
@@ -332,7 +338,7 @@ impl<C: CurveAffine> Prepared<C> {
             // be a 0
             .take(params.n() as usize - blinding_factors)
             // Chain random blinding factors.
-            .chain((0..blinding_factors).map(|_| C::Scalar::ZERO))
+            .chain(phi_blinds.into_iter().map(|&x| x))
             .collect::<Vec<_>>();
         assert_eq!(phi.len(), params.n() as usize);
         let phi = vk.domain.lagrange_from_vec(phi);
@@ -400,7 +406,9 @@ impl<C: CurveAffine> Prepared<C> {
 
         let grand_sum_blind = Blind(C::Scalar::ZERO);
         let start = instant::Instant::now();
-        let phi_commitment = params.commit_lagrange(&phi, grand_sum_blind).to_affine();
+        let phi_commitment = params
+            .commit_lagrange(&phi, grand_sum_blind.clone())
+            .to_affine();
         log::trace!(" - phi_commitment {:?}", start.elapsed());
 
         // Hash grand sum commitment

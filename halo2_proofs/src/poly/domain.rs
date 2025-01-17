@@ -10,6 +10,7 @@ use crate::{
 use super::{Coeff, ExtendedLagrangeCoeff, LagrangeCoeff, Polynomial, Rotation};
 
 use group::ff::{BatchInvert, Field, WithSmallOrderMulGroup};
+use maybe_rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use std::{collections::HashMap, marker::PhantomData};
 
@@ -142,12 +143,16 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
 
         let omega_inv = omegas_inv[0];
         let extended_omega_inv = *omegas_inv.last().unwrap();
-        let mut fft_data = HashMap::new();
-        for (i, (omega, omega_inv)) in omegas.into_iter().zip(omegas_inv).enumerate() {
-            let intermediate_k = k as usize + i;
-            let len = 1usize << intermediate_k;
-            fft_data.insert(len, FFTData::<F>::new(len, omega, omega_inv));
-        }
+        let fft_data = omegas
+            .into_par_iter()
+            .zip(omegas_inv)
+            .enumerate()
+            .map(|(i, (omega, omega_inv))| {
+                let intermediate_k = k as usize + i;
+                let len = 1usize << intermediate_k;
+                (len, FFTData::<F>::new(len, omega, omega_inv))
+            })
+            .collect::<HashMap<usize, FFTData<F>>>();
 
         EvaluationDomain {
             n,

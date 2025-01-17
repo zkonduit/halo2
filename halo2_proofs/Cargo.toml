@@ -28,6 +28,10 @@ name = "arithmetic"
 harness = false
 
 [[bench]]
+name = "polyread"
+harness = false
+
+[[bench]]
 name = "commit_zk"
 harness = false
 
