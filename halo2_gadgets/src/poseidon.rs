@@ -15,7 +15,9 @@ mod pow5;
 pub use pow5::{Pow5Chip, Pow5Config, StateWord};
 
 pub mod primitives;
-use primitives::{Absorbing, ConstantLength, Domain, Spec, SpongeMode, Squeezing, State};
+use primitives::{
+    Absorbing, ConstantLength, Domain, Spec, SpongeMode, Squeezing, State, VariableLength,
+};
 
 /// A word from the padded input to a Poseidon sponge.
 #[derive(Clone, Debug)]
@@ -285,6 +287,36 @@ impl<
             .into_iter()
             .map(PaddedWord::Message)
             .chain(<ConstantLength<L> as Domain<F, RATE>>::padding(L).map(PaddedWord::Padding))
+            .enumerate()
+        {
+            self.sponge
+                .absorb(layouter.namespace(|| format!("absorb_{i}")), value)?;
+        }
+        self.sponge
+            .finish_absorbing(layouter.namespace(|| "finish absorbing"))?
+            .squeeze(layouter.namespace(|| "squeeze"))
+    }
+}
+
+impl<
+        F: PrimeField,
+        PoseidonChip: PoseidonSpongeInstructions<F, S, VariableLength, T, RATE>,
+        S: Spec<F, T, RATE>,
+        const T: usize,
+        const RATE: usize,
+    > Hash<F, PoseidonChip, S, VariableLength, T, RATE>
+{
+    /// Hashes the given input.
+    pub fn hash(
+        mut self,
+        mut layouter: impl Layouter<F>,
+        message: Vec<AssignedCell<F, F>>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        let msg_len = message.len();
+        for (i, value) in message
+            .into_iter()
+            .map(PaddedWord::Message)
+            .chain(<VariableLength as Domain<F, RATE>>::padding(msg_len).map(PaddedWord::Padding))
             .enumerate()
         {
             self.sponge

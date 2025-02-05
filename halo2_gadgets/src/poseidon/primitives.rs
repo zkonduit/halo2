@@ -300,6 +300,37 @@ pub trait Domain<F: Field, const RATE: usize> {
     fn padding(input_len: usize) -> Self::Padding;
 }
 
+/// A Poseidon hash function used with variable input length.
+///
+/// Domain specified in [ePrint 2019/458 section 4.2](https://eprint.iacr.org/2019/458.pdf).
+#[derive(Clone, Copy, Debug)]
+pub struct VariableLength;
+
+impl<F: PrimeField, const RATE: usize> Domain<F, RATE> for VariableLength {
+    type Padding = std::iter::Take<std::iter::Chain<std::iter::Once<F>, std::iter::Repeat<F>>>;
+
+    fn name() -> String {
+        format!("VariableLength")
+    }
+
+    fn initial_capacity_element() -> F {
+        // Capacity value is $2^64 + (o-1)$ where o is the output length.
+        // We hard-code an output length of 1.
+        F::from_u128(1 << 64)
+    }
+
+    fn padding(input_len: usize) -> Self::Padding {
+        // For variable-input-length hashing, we pad the input with a one and then zeroes
+        // to a multiple of RATE. This prevents inputs of different lengths from ever colliding after
+        // padding.
+        let suffixed_len = input_len + 1;
+        let k = (suffixed_len + RATE - 1) / RATE;
+        std::iter::once(F::ONE)
+            .chain(std::iter::repeat(F::ZERO))
+            .take(k * RATE - suffixed_len)
+    }
+}
+
 /// A Poseidon hash function used with constant input length.
 ///
 /// Domain specified in [ePrint 2019/458 section 4.2](https://eprint.iacr.org/2019/458.pdf).
@@ -377,6 +408,22 @@ impl<F: PrimeField, S: Spec<F, T, RATE>, const T: usize, const RATE: usize, cons
         for value in message
             .into_iter()
             .chain(<ConstantLength<L> as Domain<F, RATE>>::padding(L))
+        {
+            self.sponge.absorb(value);
+        }
+        self.sponge.finish_absorbing().squeeze()
+    }
+}
+
+impl<F: PrimeField, S: Spec<F, T, RATE>, const T: usize, const RATE: usize>
+    Hash<F, S, VariableLength, T, RATE>
+{
+    /// Hashes the given input.
+    pub fn hash(mut self, message: Vec<F>) -> F {
+        let msg_len = message.len();
+        for value in message
+            .into_iter()
+            .chain(<VariableLength as Domain<F, RATE>>::padding(msg_len))
         {
             self.sponge.absorb(value);
         }
