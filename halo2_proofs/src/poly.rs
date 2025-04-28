@@ -320,6 +320,85 @@ impl<F: Field> Polynomial<F, LagrangeCoeff> {
     }
 }
 
+impl<F: Field, B: Basis> Polynomial<F, B> {
+    ///
+    pub fn add_mul_scalar(&mut self, poly: &Self, k: F) {
+        parallelize(&mut self.values, |lhs, start| {
+            for (lhs, rhs) in lhs
+                .iter_mut()
+                .zip(poly.values[start..].iter())
+            {
+                *lhs += (*rhs) *k;
+            }
+        });
+    }
+
+    ///
+    pub fn add_mul_scalars(&mut self, polys: &[&Self], k: &[F]) {
+        let poly_num = polys.len();
+
+        parallelize(&mut self.values, |lhs, start| {
+            let mut i = start;
+            for lhs in lhs.iter_mut()
+            {
+                for j in 0..poly_num {
+                    *lhs += polys[j].values[i] * k[j];
+                }
+
+                i += 1;
+            }
+        });
+    }
+
+    ///
+    pub fn add_inplace(&mut self, poly: &Self) {
+        parallelize(&mut self.values, |lhs, start| {
+            for (lhs, rhs) in lhs
+                .iter_mut()
+                .zip(poly.values[start..].iter())
+            {
+                *lhs += *rhs;
+            }
+        });
+    }
+
+    ///
+    pub fn mul_inplace_scalar(&mut self, k: F) {
+        parallelize(&mut self.values, |lhs, start| {
+            for lh in lhs
+                .iter_mut()
+            {
+                *lh *= k;
+            }
+        });
+    }
+
+    ///
+    pub fn sub_low_poly_mul_scalar(&mut self, poly: &Self, k: F) {
+
+        let len = poly.len();
+        let thr = 1000;
+
+        if len>thr {
+            parallelize(&mut self.values[0..len], |lhs, start| {
+                for (lhs, rhs) in lhs
+                                    .iter_mut()
+                                    .zip(poly.values[start..].iter()) {
+                    *lhs -= (*rhs) * k;
+                }
+            });
+        }
+
+        else {
+            for (lhs, rhs) in self.values[0..len]
+                                    .iter_mut()
+                                    .zip(poly.values[..].iter()) {
+                                        *lhs -= (*rhs) * k;
+            }
+        }
+    }
+}
+
 impl<F: Field, B: Basis> Mul<F> for Polynomial<F, B> {
     type Output = Polynomial<F, B>;
 
