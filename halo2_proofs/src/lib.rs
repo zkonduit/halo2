@@ -12,7 +12,6 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(missing_debug_implementations)]
 #![deny(missing_docs)]
-#![deny(unsafe_code)]
 #![feature(int_roundings)]
 
 #[cfg(feature = "counter")]
@@ -48,6 +47,5 @@ mod helpers;
 pub use helpers::SerdeFormat;
 pub use helpers::SerdePrimeField;
 
-#[cfg(feature = "icicle_gpu")]
 #[allow(unsafe_code)]
-mod icicle;
+pub mod icicle;

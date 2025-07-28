@@ -1,5 +1,4 @@
-use crate::multicore;
-
+use crate::icicle::{c_scalars_from_device_vec, create_calculation_data, create_gate_data, device_vec_from_c_scalars, inplace_invert, inplace_mul};
 use crate::plonk::{permutation, Any, ProvingKey};
 
 #[cfg(feature = "mv-lookup")]
@@ -11,22 +10,25 @@ use crate::plonk::lookup;
 use crate::poly::Basis;
 use crate::{
     arithmetic::{parallelize, CurveAffine},
-    poly::{Coeff, ExtendedLagrangeCoeff, Polynomial, Rotation},
+    poly::{Coeff, ExtendedLagrangeCoeff, Polynomial, Rotation}
 };
 
 use group::ff::{Field, PrimeField, WithSmallOrderMulGroup};
-#[cfg(feature = "mv-lookup")]
-use maybe_rayon::iter::IndexedParallelIterator;
+use icicle_bn254::curve::ScalarField;
+use icicle_core::{
+    traits::FieldImpl,
+    gate_ops::{GateData, LookupConfig, CalculationData, HornerData, GateOpsConfig, LookupData, gate_evaluation, lookups_constraint},
+    vec_ops::{accumulate_scalars, VecOpsConfig}
+};
+use icicle_runtime::{
+    memory::{DeviceVec, HostOrDeviceSlice, HostSlice},
+    stream::IcicleStream,
+};
 use maybe_rayon::iter::IntoParallelRefIterator;
 use maybe_rayon::iter::ParallelIterator;
+use maybe_rayon::join;
 
 use super::{shuffle, ConstraintSystem, Expression};
-
-#[cfg(feature = "mv-lookup")]
-use ff::BatchInvert;
-
-#[cfg(feature = "mv-lookup")]
-use maybe_rayon::iter::IntoParallelRefMutIterator;
 
 /// Return the index in the polynomial of size `isize` after rotation `rot`.
 fn get_rotation_idx(idx: usize, rot: i32, rot_scale: i32, isize: i32) -> usize {
@@ -165,6 +167,7 @@ impl Calculation {
             Calculation::Add(a, b) => get_value(a) + get_value(b),
             Calculation::Sub(a, b) => get_value(a) - get_value(b),
             Calculation::Mul(a, b) => get_value(a) * get_value(b),
+            Calculation::Store(v) => get_value(v),
             Calculation::Square(v) => get_value(v).square(),
             Calculation::Double(v) => get_value(v).double(),
             Calculation::Negate(v) => -get_value(v),
@@ -176,7 +179,6 @@ impl Calculation {
                 }
                 value
             }
-            Calculation::Store(v) => get_value(v),
         }
     }
 }
@@ -217,7 +219,7 @@ pub struct EvaluationData<C: CurveAffine> {
     pub rotations: Vec<usize>,
 }
 
-/// CaluclationInfo
+/// CalculationInfo
 #[derive(Clone, Debug)]
 pub struct CalculationInfo {
     /// Calculation
@@ -382,353 +384,591 @@ impl<C: CurveAffine> Evaluator<C> {
         shuffles: &[Vec<shuffle::prover::Committed<C>>],
         permutations: &[permutation::prover::Committed<C>],
     ) -> Polynomial<C::ScalarExt, ExtendedLagrangeCoeff> {
-        let start = instant::Instant::now();
         let domain = &pk.vk.domain;
         let size = domain.extended_len();
         let rot_scale = 1 << (domain.extended_k() - domain.k());
         let fixed = &pk.fixed_cosets[..];
+        let icicle_fixed = &pk.icicle_fixed[..];
         let extended_omega = domain.get_extended_omega();
         let isize = size as i32;
         let one = C::ScalarExt::ONE;
         let l0 = &pk.l0;
         let l_last = &pk.l_last;
         let l_active_row = &pk.l_active_row;
+        let icicle_l0 = &pk.icicle_l0;
+        let icicle_l_last = &pk.icicle_l_last;
+        let icicle_l_active_row = &pk.icicle_l_active_row;
         let p = &pk.vk.cs.permutation;
-        log::trace!(" - Initialization: {:?}", start.elapsed());
-
-        let start = instant::Instant::now();
-        // Calculate the advice and instance cosets
-        let advice: Vec<Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>>> = advice_polys
-            .iter()
-            .map(|advice_polys| {
-                advice_polys
-                    .par_iter()
-                    .map(|poly| domain.coeff_to_extended(poly))
-                    .collect()
-            })
-            .collect();
-        log::trace!(" - Advice cosets: {:?}", start.elapsed());
-
-        let start = instant::Instant::now();
-        let instance: Vec<Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>>> = instance_polys
-            .iter()
-            .map(|instance_polys| {
-                instance_polys
-                    .par_iter()
-                    .map(|poly| domain.coeff_to_extended(poly))
-                    .collect()
-            })
-            .collect();
-        log::trace!(" - Instance cosets: {:?}", start.elapsed());
 
         let mut values = domain.empty_extended();
 
         // Core expression evaluations
-
-        let start = instant::Instant::now();
-        let num_threads = multicore::current_num_threads();
-        for ((((advice, instance), lookups), shuffles), permutation) in advice
+        for ((((advice, instance), lookups), shuffles), permutation) in advice_polys
             .iter()
-            .zip(instance.iter())
+            .zip(instance_polys.iter())
             .zip(lookups.iter())
             .zip(shuffles.iter())
             .zip(permutations.iter())
         {
-            // Custom gates
+            let (instance, advice) = join(
+                || {
+                    let instance: Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>> = instance
+                        .par_iter()
+                        .map(|poly| {
+                            let mut stream = IcicleStream::create().unwrap();
+                            let result = domain.coeff_to_extended(poly, &stream);
+                            stream.synchronize().unwrap();
+                            stream.destroy().unwrap();
 
-            multicore::scope(|scope| {
-                let chunk_size = (size + num_threads - 1) / num_threads;
-                for (thread_idx, values) in values.chunks_mut(chunk_size).enumerate() {
-                    let start = thread_idx * chunk_size;
-                    scope.spawn(move |_| {
-                        let mut eval_data = self.custom_gates.instance();
-                        for (i, value) in values.iter_mut().enumerate() {
-                            let idx = start + i;
-                            *value = self.custom_gates.evaluate(
-                                &mut eval_data,
-                                fixed,
-                                advice,
-                                instance,
-                                challenges,
-                                &beta,
-                                &gamma,
-                                &theta,
-                                &y,
-                                value,
-                                idx,
-                                rot_scale,
-                                isize,
-                            );
-                        }
-                    });
-                }
-            });
-            log::trace!(" - Custom gates: {:?}", start.elapsed());
+                            result
+                        })
+                        .collect();
+
+                    instance
+                },
+                || {
+                    let advice: Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>> = advice
+                        .par_iter()
+                        .map(|poly| {
+                            let mut stream = IcicleStream::create().unwrap();
+                            let result = domain.coeff_to_extended(poly, &stream);
+                            stream.synchronize().unwrap();
+                            stream.destroy().unwrap();
+
+                            result
+                        })
+                        .collect();
+
+                    advice
+                },
+            );
+
+            let (icicle_advice, icicle_instance, icicle_challenges, icicle_beta, icicle_gamma, icicle_theta, icicle_y) = create_gate_data::<C>(
+                &advice[..],
+                &instance[..],
+                challenges,
+                beta,
+                gamma,
+                theta,
+                y,
+            );
+
+            let num_instance_rows = instance.len();
+            let num_advice_rows = advice.len();
+            let num_instance_cols = if num_instance_rows > 0 { instance[0].len() } else { 0 };
+            let num_advice_cols = if num_advice_rows > 0 { advice[0].len() } else { 0 };
+
+            let gate_data = GateData::new(
+                unsafe { icicle_fixed.as_ptr() },
+                fixed.len() as u32,
+                fixed[0].len() as u32,
+                unsafe { icicle_advice.as_ptr() },
+                num_advice_rows as u32,
+                num_advice_cols as u32,
+                unsafe { icicle_instance.as_ptr() },
+                num_instance_rows as u32,
+                num_instance_cols as u32,
+                icicle_challenges.as_ptr(),
+                challenges.len() as u32,
+                icicle_beta.as_ptr(),
+                icicle_gamma.as_ptr(),
+                icicle_theta.as_ptr(),
+                icicle_y.as_ptr(),
+            );
+
+            // Custom gates
+            {
+                let (icicle_calculations, targets, value_types, value_indices, icicle_constants, icicle_rotations, size, num_intermediates, horner_value_types, horner_value_indices, horner_offsets, horner_sizes) = create_calculation_data::<C>(
+                    &self.custom_gates.calculations,
+                    &self.custom_gates.constants,
+                    &self.custom_gates.rotations,
+                    self.custom_gates.num_intermediates,
+                );
+
+                let calculation_data = CalculationData::new(
+                    icicle_calculations.as_ptr(),
+                    targets.as_ptr(),
+                    value_types.as_ptr(),
+                    value_indices.as_ptr(),
+                    icicle_constants.as_ptr(),
+                    icicle_constants.len() as u32,
+                    icicle_rotations.as_ptr(),
+                    icicle_rotations.len() as u32,
+                    std::ptr::null(),
+                    true,
+                    size,
+                    num_intermediates,
+                    values.len() as u32,
+                    rot_scale as u32,
+                    isize as u32,
+                );
+    
+                let horner_data = HornerData::new(
+                    horner_value_types.as_ptr(),
+                    horner_value_indices.as_ptr(),
+                    horner_offsets.as_ptr(),
+                    horner_sizes.as_ptr(),
+                    horner_value_types.len() as u32
+                );
+    
+                let mut d_result = DeviceVec::device_malloc_async(values.len(), &IcicleStream::default()).unwrap();
+    
+                let mut cfg = GateOpsConfig::default();
+                cfg.is_fixed_on_device = true;
+                cfg.is_advice_on_device = true;
+                cfg.is_instance_on_device = true;
+                cfg.is_previous_value_on_device = true;
+                cfg.is_result_on_device = true;
+                
+                gate_evaluation(
+                    &gate_data,
+                    &calculation_data,
+                    &horner_data,
+                    &mut d_result,
+                    &cfg,
+                )
+                .unwrap();
+    
+    
+                let halo2_result: Vec<C::ScalarExt> = c_scalars_from_device_vec(&mut d_result, &IcicleStream::default());
+    
+                values =  Polynomial::from_vec(halo2_result);
+            }
 
             // Permutations
-            let start = instant::Instant::now();
-            let sets = &permutation.sets;
-            if !sets.is_empty() {
-                let blinding_factors = pk.vk.cs.blinding_factors();
-                let last_rotation = Rotation(-((blinding_factors + 1) as i32));
-                let chunk_len = pk.vk.cs.degree() - 2;
-                let delta_start = beta * &C::Scalar::ZETA;
+            {
+                let sets = &permutation.sets;
+                if !sets.is_empty() {
+                    let blinding_factors = pk.vk.cs.blinding_factors();
+                    let last_rotation = Rotation(-((blinding_factors + 1) as i32));
+                    let chunk_len = pk.vk.cs.degree() - 2;
+                    let delta_start = beta * &C::Scalar::ZETA;
 
-                let first_set = sets.first().unwrap();
-                let last_set = sets.last().unwrap();
+                    let first_set = sets.first().unwrap();
+                    let last_set = sets.last().unwrap();
 
-                // Permutation constraints
-                parallelize(&mut values, |values, start| {
-                    let mut beta_term = extended_omega.pow_vartime([start as u64, 0, 0, 0]);
-                    for (i, value) in values.iter_mut().enumerate() {
-                        let idx = start + i;
-                        let r_next = get_rotation_idx(idx, 1, rot_scale, isize);
-                        let r_last = get_rotation_idx(idx, last_rotation.0, rot_scale, isize);
+                    // Permutation constraints
+                    parallelize(&mut values, |values, start| {
+                        let mut beta_term = extended_omega.pow_vartime([start as u64, 0, 0, 0]);
+                        for (i, value) in values.iter_mut().enumerate() {
+                            let idx = start + i;
+                            let r_next = get_rotation_idx(idx, 1, rot_scale, isize);
+                            let r_last = get_rotation_idx(idx, last_rotation.0, rot_scale, isize);
 
-                        // Enforce only for the first set.
-                        // l_0(X) * (1 - z_0(X)) = 0
-                        *value = *value * y
-                            + ((one - first_set.permutation_product_coset[idx]) * l0[idx]);
-                        // Enforce only for the last set.
-                        // l_last(X) * (z_l(X)^2 - z_l(X)) = 0
-                        *value = *value * y
-                            + ((last_set.permutation_product_coset[idx]
-                                * last_set.permutation_product_coset[idx]
-                                - last_set.permutation_product_coset[idx])
-                                * l_last[idx]);
-                        // Except for the first set, enforce.
-                        // l_0(X) * (z_i(X) - z_{i-1}(\omega^(last) X)) = 0
-                        for (set_idx, set) in sets.iter().enumerate() {
-                            if set_idx != 0 {
-                                *value = *value * y
-                                    + ((set.permutation_product_coset[idx]
-                                        - permutation.sets[set_idx - 1].permutation_product_coset
-                                            [r_last])
-                                        * l0[idx]);
+                            // Enforce only for the first set.
+                            // l_0(X) * (1 - z_0(X)) = 0
+                            *value = *value * y
+                                + ((one - first_set.permutation_product_coset[idx]) * l0[idx]);
+                            // Enforce only for the last set.
+                            // l_last(X) * (z_l(X)^2 - z_l(X)) = 0
+                            *value = *value * y
+                                + ((last_set.permutation_product_coset[idx]
+                                    * last_set.permutation_product_coset[idx]
+                                    - last_set.permutation_product_coset[idx])
+                                    * l_last[idx]);
+                            // Except for the first set, enforce.
+                            // l_0(X) * (z_i(X) - z_{i-1}(\omega^(last) X)) = 0
+                            for (set_idx, set) in sets.iter().enumerate() {
+                                if set_idx != 0 {
+                                    *value = *value * y
+                                        + ((set.permutation_product_coset[idx]
+                                            - permutation.sets[set_idx - 1].permutation_product_coset
+                                                [r_last])
+                                            * l0[idx]);
+                                }
                             }
-                        }
-                        // And for all the sets we enforce:
-                        // (1 - (l_last(X) + l_blind(X))) * (
-                        //   z_i(\omega X) \prod_j (p(X) + \beta s_j(X) + \gamma)
-                        // - z_i(X) \prod_j (p(X) + \delta^j \beta X + \gamma)
-                        // )
-                        let mut current_delta = delta_start * beta_term;
-                        for ((set, columns), cosets) in sets
-                            .iter()
-                            .zip(p.columns.chunks(chunk_len))
-                            .zip(pk.permutation.cosets.chunks(chunk_len))
-                        {
-                            let mut left = set.permutation_product_coset[r_next];
-                            for (values, permutation) in columns
+                            // And for all the sets we enforce:
+                            // (1 - (l_last(X) + l_blind(X))) * (
+                            //   z_i(\omega X) \prod_j (p(X) + \beta s_j(X) + \gamma)
+                            // - z_i(X) \prod_j (p(X) + \delta^j \beta X + \gamma)
+                            // )
+                            let mut current_delta = delta_start * beta_term;
+                            for ((set, columns), cosets) in sets
                                 .iter()
-                                .map(|&column| match column.column_type() {
+                                .zip(p.columns.chunks(chunk_len))
+                                .zip(pk.permutation.cosets.chunks(chunk_len))
+                            {
+                                let mut left = set.permutation_product_coset[r_next];
+                                for (values, permutation) in columns
+                                    .iter()
+                                    .map(|&column| match column.column_type() {
+                                        Any::Advice(_) => &advice[column.index()],
+                                        Any::Fixed => &fixed[column.index()],
+                                        Any::Instance => &instance[column.index()],
+                                    })
+                                    .zip(cosets.iter())
+                                {
+                                    left *= values[idx] + beta * permutation[idx] + gamma;
+                                }
+
+                                let mut right = set.permutation_product_coset[idx];
+                                for values in columns.iter().map(|&column| match column.column_type() {
                                     Any::Advice(_) => &advice[column.index()],
                                     Any::Fixed => &fixed[column.index()],
                                     Any::Instance => &instance[column.index()],
-                                })
-                                .zip(cosets.iter())
-                            {
-                                left *= values[idx] + beta * permutation[idx] + gamma;
-                            }
+                                }) {
+                                    right *= values[idx] + current_delta + gamma;
+                                    current_delta *= &C::Scalar::DELTA;
+                                }
 
-                            let mut right = set.permutation_product_coset[idx];
-                            for values in columns.iter().map(|&column| match column.column_type() {
-                                Any::Advice(_) => &advice[column.index()],
-                                Any::Fixed => &fixed[column.index()],
-                                Any::Instance => &instance[column.index()],
-                            }) {
-                                right *= values[idx] + current_delta + gamma;
-                                current_delta *= &C::Scalar::DELTA;
+                                *value = *value * y + ((left - right) * l_active_row[idx]);
                             }
-
-                            *value = *value * y + ((left - right) * l_active_row[idx]);
+                            beta_term *= &extended_omega;
                         }
-                        beta_term *= &extended_omega;
-                    }
-                });
-            }
-            log::trace!(" - Permutations: {:?}", start.elapsed());
-
-            let start = instant::Instant::now();
-            // For lookups, compute inputs_inv_sum = ∑ 1 / (f_i(X) + α)
-            // The outer vector has capacity self.lookups.len()
-            // The middle vector has capacity domain.extended_len()
-            // The inner vector has capacity
-            log::trace!("num lookups: {}", lookups.len());
-
-            #[cfg(feature = "mv-lookup")]
-            let inputs_inv_sum_cosets: Vec<_> = lookups
-                .par_iter()
-                .enumerate()
-                .map(|(n, lookup)| {
-                    let (inputs_lookup_evaluator, _) = &self.lookups[n];
-                    let mut inputs_eval_data: Vec<_> = inputs_lookup_evaluator
-                        .iter()
-                        .map(|input_lookup_evaluator| input_lookup_evaluator.instance())
-                        .collect();
-
-                    let mut inputs_values_for_extended_domain: Vec<C::Scalar> =
-                        Vec::with_capacity(self.lookups[n].0.len() * domain.extended_len());
-                    for idx in 0..domain.extended_len() {
-                        // For each compressed input column, evaluate at ω^i and add beta
-                        // This is a vector of length self.lookups[n].0.len()
-                        let inputs_values: Vec<C::ScalarExt> = inputs_lookup_evaluator
-                            .par_iter()
-                            .zip(inputs_eval_data.par_iter_mut())
-                            .map(|(input_lookup_evaluator, input_eval_data)| {
-                                input_lookup_evaluator.evaluate(
-                                    input_eval_data,
-                                    fixed,
-                                    advice,
-                                    instance,
-                                    challenges,
-                                    &beta,
-                                    &gamma,
-                                    &theta,
-                                    &y,
-                                    &C::ScalarExt::ZERO,
-                                    idx,
-                                    rot_scale,
-                                    isize,
-                                )
-                            })
-                            .collect();
-
-                        inputs_values_for_extended_domain.extend_from_slice(&inputs_values);
-                    }
-
-                    inputs_values_for_extended_domain.batch_invert();
-
-                    // The outer vector has capacity domain.extended_len()
-                    // The inner vector has capacity self.lookups[n].0.len()
-                    let inputs_inv_sums: Vec<Vec<_>> = inputs_values_for_extended_domain
-                        .chunks_exact(self.lookups[n].0.len())
-                        .map(|c| c.to_vec())
-                        .collect();
-
-                    (
-                        inputs_inv_sums,
-                        domain.coeff_to_extended(&lookup.phi_poly),
-                        domain.coeff_to_extended(&lookup.m_poly),
-                    )
-                })
-                .collect();
-            #[cfg(feature = "mv-lookup")]
-            log::trace!(" - Lookups inv sum: {:?}", start.elapsed());
-
-            #[cfg(feature = "mv-lookup")]
-            let start = instant::Instant::now();
-            // Lookups
-            #[cfg(feature = "mv-lookup")]
-            parallelize(&mut values, |values, start| {
-                for (n, _lookup) in lookups.iter().enumerate() {
-                    // Polynomials required for this lookup.
-                    // Calculated here so these only have to be kept in memory for the short time
-                    // they are actually needed.
-
-                    let (inputs_inv_sum, phi_coset, m_coset) = &inputs_inv_sum_cosets[n];
-
-                    // Lookup constraints
-                    /*
-                        φ_i(X) = f_i(X) + α
-                        τ(X) = t(X) + α
-                        LHS = τ(X) * Π(φ_i(X)) * (ϕ(gX) - ϕ(X))
-                        RHS = τ(X) * Π(φ_i(X)) * (∑ 1/(φ_i(X)) - m(X) / τ(X))))
-                            = (τ(X) * Π(φ_i(X)) * ∑ 1/(φ_i(X))) - Π(φ_i(X)) * m(X)
-                            = Π(φ_i(X)) * (τ(X) * ∑ 1/(φ_i(X)) - m(X))
-                    */
-
-                    let (inputs_lookup_evaluator, table_lookup_evaluator) = &self.lookups[n];
-                    let mut inputs_eval_data: Vec<_> = inputs_lookup_evaluator
-                        .iter()
-                        .map(|input_lookup_evaluator| input_lookup_evaluator.instance())
-                        .collect();
-
-                    let mut table_eval_data = table_lookup_evaluator.instance();
-
-                    for (i, value) in values.iter_mut().enumerate() {
-                        let idx = start + i;
-
-                        // f_i(X) + α for i in expressions
-                        let inputs_value: Vec<C::ScalarExt> = inputs_lookup_evaluator
-                            .iter()
-                            .zip(inputs_eval_data.iter_mut())
-                            .map(|(input_lookup_evaluator, input_eval_data)| {
-                                input_lookup_evaluator.evaluate(
-                                    input_eval_data,
-                                    fixed,
-                                    advice,
-                                    instance,
-                                    challenges,
-                                    &beta,
-                                    &gamma,
-                                    &theta,
-                                    &y,
-                                    &C::ScalarExt::ZERO,
-                                    idx,
-                                    rot_scale,
-                                    isize,
-                                )
-                            })
-                            .collect();
-
-                        // Π(φ_i(X))
-                        let inputs_prod: C::Scalar = inputs_value
-                            .iter()
-                            .fold(C::Scalar::ONE, |acc, input| acc * input);
-
-                        // f_i(X) + α at ω^idx
-                        let fi_inverses = &inputs_inv_sum[idx];
-                        let inputs_inv_sum = fi_inverses
-                            .iter()
-                            .fold(C::Scalar::ZERO, |acc, input| acc + input);
-
-                        // t(X) + α
-                        let table_value = table_lookup_evaluator.evaluate(
-                            &mut table_eval_data,
-                            fixed,
-                            advice,
-                            instance,
-                            challenges,
-                            &beta,
-                            &gamma,
-                            &theta,
-                            &y,
-                            &C::ScalarExt::ZERO,
-                            idx,
-                            rot_scale,
-                            isize,
-                        );
-
-                        let r_next = get_rotation_idx(idx, 1, rot_scale, isize);
-
-                        let lhs = {
-                            // τ(X) * Π(φ_i(X)) * (ϕ(gX) - ϕ(X))
-                            table_value * inputs_prod * (phi_coset[r_next] - phi_coset[idx])
-                        };
-
-                        let rhs = {
-                            //   τ(X) * Π(φ_i(X)) * (∑ 1/(φ_i(X)) - m(X) / τ(X))))
-                            // = (τ(X) * Π(φ_i(X)) * ∑ 1/(φ_i(X))) - Π(φ_i(X)) * m(X)
-                            // = Π(φ_i(X)) * (τ(X) * ∑ 1/(φ_i(X)) - m(X))
-                            inputs_prod * (table_value * inputs_inv_sum - m_coset[idx])
-                        };
-
-                        // phi[0] = 0
-                        *value = *value * y + l0[idx] * phi_coset[idx];
-
-                        // phi[u] = 0
-                        *value = *value * y + l_last[idx] * phi_coset[idx];
-
-                        // q(X) = LHS - RHS mod zH(X)
-                        *value = *value * y + (lhs - rhs) * l_active_row[idx];
-                    }
+                    });
                 }
-            });
+            }
 
-            // delete the cosets
+            // Merged Lookups section
             #[cfg(feature = "mv-lookup")]
-            drop(inputs_inv_sum_cosets);
+            {
+                let y_vec = [y];
+                let icicle_y = device_vec_from_c_scalars(&y_vec, &IcicleStream::default());
+                let mut icicle_previous_value = device_vec_from_c_scalars(&values, &IcicleStream::default());
+
+                let inputs_inv_sum_vec = vec![ScalarField::zero(); values.len()];
+                let h_inputs_inv_sum = HostSlice::from_slice(&inputs_inv_sum_vec);
+
+                for (n, lookup) in lookups.iter().enumerate() {
+
+                    let ((m_coset, phi_coset), (inputs_inv_sums, (inputs_prods, table_values))) = join(
+                        || {
+                            let mut stream_m_poly = IcicleStream::create().unwrap();
+                            let mut stream_phi_poly = IcicleStream::create().unwrap();
+
+                            let m_coset = domain.coeff_to_extended_device_vec(&lookup.m_poly, &stream_m_poly);
+                            let phi_coset = domain.coeff_to_extended_device_vec(&lookup.phi_poly, &stream_phi_poly);
+
+                            stream_m_poly.synchronize().unwrap();
+                            stream_phi_poly.synchronize().unwrap();
+                            stream_m_poly.destroy().unwrap();
+                            stream_phi_poly.destroy().unwrap();
+
+                            (m_coset, phi_coset)
+                        },
+                        || join(
+                            || {
+                                let mut stream: IcicleStream = IcicleStream::create().unwrap();
+
+                                let mut d_result = DeviceVec::device_malloc_async(domain.extended_len(), &stream).unwrap();
+
+                                let gate_data = GateData::new(
+                                    unsafe { icicle_fixed.as_ptr() },
+                                    fixed.len() as u32,
+                                    fixed[0].len() as u32,
+                                    unsafe { icicle_advice.as_ptr() },
+                                    num_advice_rows as u32,
+                                    num_advice_cols as u32,
+                                    unsafe { icicle_instance.as_ptr() },
+                                    num_instance_rows as u32,
+                                    num_instance_cols as u32,
+                                    icicle_challenges.as_ptr(),
+                                    challenges.len() as u32,
+                                    icicle_beta.as_ptr(),
+                                    icicle_gamma.as_ptr(),
+                                    icicle_theta.as_ptr(),
+                                    unsafe { icicle_y.as_ptr() },
+                                );
+
+                                let (inputs_lookup_evaluator, _) = &self.lookups[n];
+
+
+                                let mut d_inputs_inv_sum = DeviceVec::<ScalarField>::device_malloc_async(values.len(), &stream).unwrap();
+                                d_inputs_inv_sum.copy_from_host_async(h_inputs_inv_sum, &stream).unwrap();
+
+                                // For each compressed input column, evaluate at ω^i and add beta
+                                // This is a vector of length self.lookups[n].0.len()
+                                inputs_lookup_evaluator.iter().for_each(
+                                    |input_lookup_evaluator| {
+                                        let (
+                                            icicle_calculations,
+                                            targets,
+                                            value_types,
+                                            value_indices,
+                                            icicle_constants,
+                                            icicle_rotations,
+                                            size,
+                                            num_intermediates,
+                                            horner_value_types,
+                                            horner_value_indices,
+                                            horner_offsets,
+                                            horner_sizes,
+                                        ) = create_calculation_data::<C>(
+                                            &input_lookup_evaluator.calculations,
+                                            &input_lookup_evaluator.constants,
+                                            &input_lookup_evaluator.rotations,
+                                            input_lookup_evaluator.num_intermediates,
+                                        );
+
+                                        let calculation_data = CalculationData::new(
+                                            icicle_calculations.as_ptr(),
+                                            targets.as_ptr(),
+                                            value_types.as_ptr(),
+                                            value_indices.as_ptr(),
+                                            icicle_constants.as_ptr(),
+                                            icicle_constants.len() as u32,
+                                            icicle_rotations.as_ptr(),
+                                            icicle_rotations.len() as u32,
+                                            std::ptr::null(),
+                                            true,
+                                            size,
+                                            num_intermediates,
+                                            domain.extended_len() as u32,
+                                            rot_scale as u32,
+                                            isize as u32,
+                                        );
+                                        
+                                        let horner_data = HornerData::new(
+                                            horner_value_types.as_ptr(),
+                                            horner_value_indices.as_ptr(),
+                                            horner_offsets.as_ptr(),
+                                            horner_sizes.as_ptr(),
+                                            horner_value_types.len() as u32,
+                                        );
+                                        
+                                        let mut cfg = GateOpsConfig::default();
+                                        cfg.is_async = true;
+                                        cfg.stream_handle = (&stream).into();
+                                        cfg.is_fixed_on_device = true;
+                                        cfg.is_advice_on_device = true;
+                                        cfg.is_instance_on_device = true;
+                                        cfg.is_previous_value_on_device = true;
+                                        cfg.is_result_on_device = true;
+
+                                        gate_evaluation(
+                                            &gate_data,
+                                            &calculation_data,
+                                            &horner_data,
+                                            &mut d_result[..],
+                                            &cfg,
+                                        )
+                                        .unwrap();
+
+                                        let cfg = VecOpsConfig::default();
+                                        inplace_invert(&mut d_result, &stream);
+
+                                        accumulate_scalars(&mut d_inputs_inv_sum, &d_result, &cfg).unwrap();
+                                    },
+                                );
+
+                                stream.synchronize().unwrap();
+                                stream.destroy().unwrap();
+
+                                d_inputs_inv_sum
+                            },
+                            || {
+                                let mut stream = IcicleStream::create().unwrap();
+                                let mut d_result = DeviceVec::device_malloc_async(domain.extended_len(), &stream).unwrap();
+
+                                let gate_data = GateData::new(
+                                    unsafe { icicle_fixed.as_ptr() },
+                                    fixed.len() as u32,
+                                    fixed[0].len() as u32,
+                                    unsafe { icicle_advice.as_ptr() },
+                                    num_advice_rows as u32,
+                                    num_advice_cols as u32,
+                                    unsafe { icicle_instance.as_ptr() },
+                                    num_instance_rows as u32,
+                                    num_instance_cols as u32,
+                                    icicle_challenges.as_ptr(),
+                                    challenges.len() as u32,
+                                    icicle_beta.as_ptr(),
+                                    icicle_gamma.as_ptr(),
+                                    icicle_theta.as_ptr(),
+                                    unsafe { icicle_y.as_ptr() },
+                                );
+
+                                let (inputs_lookup_evaluator, table_lookup_evaluator) = &self.lookups[n];
+
+                                let inputs_prods_vec = vec![ScalarField::one(); values.len()];
+                                let h_inputs_prods = HostSlice::from_slice(&inputs_prods_vec);
+                                let mut d_inputs_prods =
+                                    DeviceVec::<ScalarField>::device_malloc_async(values.len(), &stream).unwrap();
+                                d_inputs_prods.copy_from_host_async(h_inputs_prods, &stream).unwrap();
+
+                                inputs_lookup_evaluator
+                                    .iter()
+                                    .for_each(|input_lookup_evaluator| {
+                                        let (
+                                            icicle_calculations,
+                                            targets,
+                                            value_types,
+                                            value_indices,
+                                            icicle_constants,
+                                            icicle_rotations,
+                                            size,
+                                            num_intermediates,
+                                            horner_value_types,
+                                            horner_value_indices,
+                                            horner_offsets,
+                                            horner_sizes,
+                                        ) = create_calculation_data::<C>(
+                                            &input_lookup_evaluator.calculations,
+                                            &input_lookup_evaluator.constants,
+                                            &input_lookup_evaluator.rotations,
+                                            input_lookup_evaluator.num_intermediates,
+                                        );
+
+                                        let calculation_data = CalculationData::new(
+                                            icicle_calculations.as_ptr(),
+                                            targets.as_ptr(),
+                                            value_types.as_ptr(),
+                                            value_indices.as_ptr(),
+                                            icicle_constants.as_ptr(),
+                                            icicle_constants.len() as u32,
+                                            icicle_rotations.as_ptr(),
+                                            icicle_rotations.len() as u32,
+                                            unsafe { icicle_previous_value.as_ptr() },
+                                            false,
+                                            size,
+                                            num_intermediates,
+                                            values.len() as u32,
+                                            rot_scale as u32,
+                                            isize as u32,
+                                        );
+
+                                        let horner_data = HornerData::new(
+                                            horner_value_types.as_ptr(),
+                                            horner_value_indices.as_ptr(),
+                                            horner_offsets.as_ptr(),
+                                            horner_sizes.as_ptr(),
+                                            horner_value_types.len() as u32,
+                                        );
+
+                                        let mut cfg = GateOpsConfig::default();
+
+                                        cfg.is_fixed_on_device = true;
+                                        cfg.is_advice_on_device = true;
+                                        cfg.is_instance_on_device = true;
+                                        cfg.is_previous_value_on_device = true;
+                                        cfg.is_result_on_device = true;
+
+                                        gate_evaluation(
+                                            &gate_data,
+                                            &calculation_data,
+                                            &horner_data,
+                                            &mut d_result[..],
+                                            &cfg,
+                                        )
+                                        .unwrap();
+
+                                        inplace_mul(&mut d_inputs_prods, &d_result, &stream);
+                                    });
+
+                                let table_values: DeviceVec<ScalarField> = {
+                                    let (
+                                        icicle_calculations,
+                                        targets,
+                                        value_types,
+                                        value_indices,
+                                        icicle_constants,
+                                        icicle_rotations,
+                                        size,
+                                        num_intermediates,
+                                        horner_value_types,
+                                        horner_value_indices,
+                                        horner_offsets,
+                                        horner_sizes,
+                                    ) = create_calculation_data::<C>(
+                                        &table_lookup_evaluator.calculations,
+                                        &table_lookup_evaluator.constants,
+                                        &table_lookup_evaluator.rotations,
+                                        table_lookup_evaluator.num_intermediates,
+                                    );
+
+                                    let calculation_data = CalculationData::new(
+                                        icicle_calculations.as_ptr(),
+                                        targets.as_ptr(),
+                                        value_types.as_ptr(),
+                                        value_indices.as_ptr(),
+                                        icicle_constants.as_ptr(),
+                                        icicle_constants.len() as u32,
+                                        icicle_rotations.as_ptr(),
+                                        icicle_rotations.len() as u32,
+                                        unsafe { icicle_previous_value.as_ptr() },
+                                        false,
+                                        size,
+                                        num_intermediates,
+                                        domain.extended_len() as u32,
+                                        rot_scale as u32,
+                                        isize as u32,
+                                    );
+
+                                    let horner_data = HornerData::new(
+                                        horner_value_types.as_ptr(),
+                                        horner_value_indices.as_ptr(),
+                                        horner_offsets.as_ptr(),
+                                        horner_sizes.as_ptr(),
+                                        horner_value_types.len() as u32,
+                                    );
+
+                                    let mut cfg = GateOpsConfig::default();
+                                    cfg.is_fixed_on_device = true;
+                                    cfg.is_advice_on_device = true;
+                                    cfg.is_instance_on_device = true;
+                                    cfg.is_previous_value_on_device = true;
+
+                                    let mut d_table_values =
+                                        DeviceVec::device_malloc_async(values.len(), &stream).unwrap();
+
+                                    gate_evaluation(
+                                        &gate_data,
+                                        &calculation_data,
+                                        &horner_data,
+                                        &mut d_table_values[..],
+                                        &cfg,
+                                    )
+                                    .unwrap();
+
+                                    d_table_values
+                                };
+
+                                stream.synchronize().unwrap();
+                                stream.destroy().unwrap();
+
+                                (d_inputs_prods, table_values)
+                            }
+                        )
+                    );
+
+                    let lookup_data = LookupData::new(
+                        unsafe { table_values.as_ptr() },
+                        table_values.len() as u32,
+                        unsafe { inputs_prods.as_ptr() },
+                        inputs_prods.len() as u32,
+                        unsafe { inputs_inv_sums.as_ptr() },
+                        inputs_inv_sums.len() as u32,
+                        unsafe { phi_coset.as_ptr() },
+                        phi_coset.len() as u32,
+                        unsafe { m_coset.as_ptr() },
+                        m_coset.len() as u32,
+                        unsafe { icicle_l0.as_ptr() },
+                        l0.len() as u32,
+                        unsafe { icicle_l_last.as_ptr() },
+                        l_last.len() as u32,
+                        unsafe { icicle_l_active_row.as_ptr() },
+                        l_active_row.len() as u32,
+                        unsafe { icicle_y.as_ptr() },
+                        unsafe { icicle_previous_value.as_ptr() },
+                        values.len() as u32,
+                        rot_scale as u32,
+                        isize as u32,
+                    );
+
+                    let mut cfg = LookupConfig::default();
+                    cfg.is_coset_on_device = true;
+                    cfg.is_table_values_on_device = true;
+                    cfg.is_inputs_inv_sums_on_device = true;
+                    cfg.is_inputs_prods_on_device = true;
+                    cfg.is_l_on_device = true;
+                    cfg.is_y_on_device = true;
+                    cfg.is_result_on_device = true;
+                    lookups_constraint(&lookup_data, &mut icicle_previous_value, &cfg).unwrap();
+                }
+
+                let result: Vec<C::ScalarExt> = c_scalars_from_device_vec(&mut icicle_previous_value, &IcicleStream::default());
+                values = Polynomial::from_vec(result);
+            }
 
             #[cfg(all(not(feature = "mv-lookup"), feature = "precompute-coset"))]
             let mut cosets: Vec<_> = {
@@ -745,150 +985,165 @@ impl<C: CurveAffine> Evaluator<C> {
                     .collect()
             };
 
+            // Lookup Constraints
             #[cfg(not(feature = "mv-lookup"))]
-            // Lookups
-            for (n, lookup) in lookups.iter().enumerate() {
-                // Polynomials required for this lookup.
-                // Calculated here so these only have to be kept in memory for the short time
-                // they are actually needed.
-
-                #[cfg(feature = "precompute-coset")]
-                let (product_coset, permuted_input_coset, permuted_table_coset) = &cosets.remove(0);
-
-                #[cfg(not(feature = "precompute-coset"))]
-                let (product_coset, permuted_input_coset, permuted_table_coset) = {
-                    let product_coset = pk.vk.domain.coeff_to_extended(&lookup.product_poly);
-                    let permuted_input_coset =
-                        pk.vk.domain.coeff_to_extended(&lookup.permuted_input_poly);
-                    let permuted_table_coset =
-                        pk.vk.domain.coeff_to_extended(&lookup.permuted_table_poly);
-                    (product_coset, permuted_input_coset, permuted_table_coset)
-                };
-
-                // Lookup constraints
-                parallelize(&mut values, |values, start| {
-                    let lookup_evaluator = &self.lookups[n];
-                    let mut eval_data = lookup_evaluator.instance();
-                    for (i, value) in values.iter_mut().enumerate() {
-                        let idx = start + i;
-
-                        let table_value = lookup_evaluator.evaluate(
-                            &mut eval_data,
-                            fixed,
-                            advice,
-                            instance,
-                            challenges,
-                            &beta,
-                            &gamma,
-                            &theta,
-                            &y,
-                            &C::ScalarExt::ZERO,
-                            idx,
-                            rot_scale,
-                            isize,
-                        );
-
-                        let r_next = get_rotation_idx(idx, 1, rot_scale, isize);
-                        let r_prev = get_rotation_idx(idx, -1, rot_scale, isize);
-
-                        let a_minus_s = permuted_input_coset[idx] - permuted_table_coset[idx];
-                        // l_0(X) * (1 - z(X)) = 0
-                        *value = *value * y + ((one - product_coset[idx]) * l0[idx]);
-                        // l_last(X) * (z(X)^2 - z(X)) = 0
-                        *value = *value * y
-                            + ((product_coset[idx] * product_coset[idx] - product_coset[idx])
-                                * l_last[idx]);
-                        // (1 - (l_last(X) + l_blind(X))) * (
-                        //   z(\omega X) (a'(X) + \beta) (s'(X) + \gamma)
-                        //   - z(X) (\theta^{m-1} a_0(X) + ... + a_{m-1}(X) + \beta)
-                        //          (\theta^{m-1} s_0(X) + ... + s_{m-1}(X) + \gamma)
-                        // ) = 0
-                        *value = *value * y
-                            + ((product_coset[r_next]
-                                * (permuted_input_coset[idx] + beta)
-                                * (permuted_table_coset[idx] + gamma)
-                                - product_coset[idx] * table_value)
-                                * l_active_row[idx]);
-                        // Check that the first values in the permuted input expression and permuted
-                        // fixed expression are the same.
-                        // l_0(X) * (a'(X) - s'(X)) = 0
-                        *value = *value * y + (a_minus_s * l0[idx]);
-                        // Check that each value in the permuted lookup input expression is either
-                        // equal to the value above it, or the value at the same index in the
-                        // permuted table expression.
-                        // (1 - (l_last + l_blind)) * (a′(X) − s′(X))⋅(a′(X) − a′(\omega^{-1} X)) = 0
-                        *value = *value * y
-                            + (a_minus_s
-                                * (permuted_input_coset[idx] - permuted_input_coset[r_prev])
-                                * l_active_row[idx]);
-                    }
-                });
+            {
+                for (n, lookup) in lookups.iter().enumerate() {
+                    // Polynomials required for this lookup.
+                    // Calculated here so these only have to be kept in memory for the short time
+                    // they are actually needed.
+    
+                    #[cfg(feature = "precompute-coset")]
+                    let (product_coset, permuted_input_coset, permuted_table_coset) = &cosets.remove(0);
+    
+                    #[cfg(not(feature = "precompute-coset"))]
+                    let (product_coset, permuted_input_coset, permuted_table_coset) = {
+                        let mut stream_coset = IcicleStream::create().unwrap();
+                        let mut stream_input_coset = IcicleStream::create().unwrap();
+                        let mut stream_table_coset = IcicleStream::create().unwrap();
+    
+                        let product_coset = pk.vk.domain.coeff_to_extended(&lookup.product_poly, &stream_coset);
+                        let permuted_input_coset =
+                            pk.vk.domain.coeff_to_extended(&lookup.permuted_input_poly, &stream_input_coset);
+                        let permuted_table_coset =
+                            pk.vk.domain.coeff_to_extended(&lookup.permuted_table_poly, &stream_table_coset);
+    
+                        stream_coset.synchronize().unwrap();
+                        stream_input_coset.synchronize().unwrap();
+                        stream_table_coset.synchronize().unwrap();
+    
+                        stream_coset.destroy().unwrap();
+                        stream_input_coset.destroy().unwrap();
+                        stream_table_coset.destroy().unwrap();
+    
+                        (product_coset, permuted_input_coset, permuted_table_coset)
+    
+                    };
+    
+                    // Lookup constraints
+                    parallelize(&mut values, |values, start| {
+                        let lookup_evaluator = &self.lookups[n];
+                        let mut eval_data = lookup_evaluator.instance();
+                        for (i, value) in values.iter_mut().enumerate() {
+                            let idx = start + i;
+    
+                            let table_value = lookup_evaluator.evaluate(
+                                &mut eval_data,
+                                fixed,
+                                &advice[..],
+                                &instance[..],
+                                challenges,
+                                &beta,
+                                &gamma,
+                                &theta,
+                                &y,
+                                &C::ScalarExt::ZERO,
+                                idx,
+                                rot_scale,
+                                isize,
+                            );
+    
+                            let r_next = get_rotation_idx(idx, 1, rot_scale, isize);
+                            let r_prev = get_rotation_idx(idx, -1, rot_scale, isize);
+    
+                            let a_minus_s = permuted_input_coset[idx] - permuted_table_coset[idx];
+                            // l_0(X) * (1 - z(X)) = 0
+                            *value = *value * y + ((one - product_coset[idx]) * l0[idx]);
+                            // l_last(X) * (z(X)^2 - z(X)) = 0
+                            *value = *value * y
+                                + ((product_coset[idx] * product_coset[idx] - product_coset[idx])
+                                    * l_last[idx]);
+                            // (1 - (l_last(X) + l_blind(X))) * (
+                            //   z(\omega X) (a'(X) + \beta) (s'(X) + \gamma)
+                            //   - z(X) (\theta^{m-1} a_0(X) + ... + a_{m-1}(X) + \beta)
+                            //          (\theta^{m-1} s_0(X) + ... + s_{m-1}(X) + \gamma)
+                            // ) = 0
+                            *value = *value * y
+                                + ((product_coset[r_next]
+                                    * (permuted_input_coset[idx] + beta)
+                                    * (permuted_table_coset[idx] + gamma)
+                                    - product_coset[idx] * table_value)
+                                    * l_active_row[idx]);
+                            // Check that the first values in the permuted input expression and permuted
+                            // fixed expression are the same.
+                            // l_0(X) * (a'(X) - s'(X)) = 0
+                            *value = *value * y + (a_minus_s * l0[idx]);
+                            // Check that each value in the permuted lookup input expression is either
+                            // equal to the value above it, or the value at the same index in the
+                            // permuted table expression.
+                            // (1 - (l_last + l_blind)) * (a′(X) − s′(X))⋅(a′(X) − a′(\omega^{-1} X)) = 0
+                            *value = *value * y
+                                + (a_minus_s
+                                    * (permuted_input_coset[idx] - permuted_input_coset[r_prev])
+                                    * l_active_row[idx]);
+                        }
+                    });
+                }
             }
-            log::trace!(" - Lookups constraints: {:?}", start.elapsed());
 
             // Shuffle constraints
-            let start = instant::Instant::now();
-            for (n, shuffle) in shuffles.iter().enumerate() {
-                let product_coset = pk.vk.domain.coeff_to_extended(&shuffle.product_poly);
+            {
+                for (n, shuffle) in shuffles.iter().enumerate() {
+                    let product_coset = pk.vk.domain.coeff_to_extended(&shuffle.product_poly, &IcicleStream::default());
 
-                // Shuffle constraints
-                parallelize(&mut values, |values, start| {
-                    let input_evaluator = &self.shuffles[2 * n];
-                    let shuffle_evaluator = &self.shuffles[2 * n + 1];
-                    let mut eval_data_input = shuffle_evaluator.instance();
-                    let mut eval_data_shuffle = shuffle_evaluator.instance();
-                    for (i, value) in values.iter_mut().enumerate() {
-                        let idx = start + i;
+                    // Shuffle constraints
+                    parallelize(&mut values, |values, start| {
+                        let input_evaluator = &self.shuffles[2 * n];
+                        let shuffle_evaluator = &self.shuffles[2 * n + 1];
+                        let mut eval_data_input = shuffle_evaluator.instance();
+                        let mut eval_data_shuffle = shuffle_evaluator.instance();
+                        for (i, value) in values.iter_mut().enumerate() {
+                            let idx = start + i;
 
-                        let input_value = input_evaluator.evaluate(
-                            &mut eval_data_input,
-                            fixed,
-                            advice,
-                            instance,
-                            challenges,
-                            &beta,
-                            &gamma,
-                            &theta,
-                            &y,
-                            &C::ScalarExt::ZERO,
-                            idx,
-                            rot_scale,
-                            isize,
-                        );
+                            let input_value = input_evaluator.evaluate(
+                                &mut eval_data_input,
+                                fixed,
+                                &advice[..],
+                                &instance[..],
+                                challenges,
+                                &beta,
+                                &gamma,
+                                &theta,
+                                &y,
+                                &C::ScalarExt::ZERO,
+                                idx,
+                                rot_scale,
+                                isize,
+                            );
 
-                        let shuffle_value = shuffle_evaluator.evaluate(
-                            &mut eval_data_shuffle,
-                            fixed,
-                            advice,
-                            instance,
-                            challenges,
-                            &beta,
-                            &gamma,
-                            &theta,
-                            &y,
-                            &C::ScalarExt::ZERO,
-                            idx,
-                            rot_scale,
-                            isize,
-                        );
+                            let shuffle_value = shuffle_evaluator.evaluate(
+                                &mut eval_data_shuffle,
+                                fixed,
+                                &advice[..],
+                                &instance[..],
+                                challenges,
+                                &beta,
+                                &gamma,
+                                &theta,
+                                &y,
+                                &C::ScalarExt::ZERO,
+                                idx,
+                                rot_scale,
+                                isize,
+                            );
 
-                        let r_next = get_rotation_idx(idx, 1, rot_scale, isize);
+                            let r_next = get_rotation_idx(idx, 1, rot_scale, isize);
 
-                        // l_0(X) * (1 - z(X)) = 0
-                        *value = *value * y + ((one - product_coset[idx]) * l0[idx]);
-                        // l_last(X) * (z(X)^2 - z(X)) = 0
-                        *value = *value * y
-                            + ((product_coset[idx] * product_coset[idx] - product_coset[idx])
-                                * l_last[idx]);
-                        // (1 - (l_last(X) + l_blind(X))) * (z(\omega X) (s(X) + \gamma) - z(X) (a(X) + \gamma)) = 0
-                        *value = *value * y
-                            + l_active_row[idx]
-                                * (product_coset[r_next] * shuffle_value
-                                    - product_coset[idx] * input_value)
-                    }
-                });
+                            // l_0(X) * (1 - z(X)) = 0
+                            *value = *value * y + ((one - product_coset[idx]) * l0[idx]);
+                            // l_last(X) * (z(X)^2 - z(X)) = 0
+                            *value = *value * y
+                                + ((product_coset[idx] * product_coset[idx] - product_coset[idx])
+                                    * l_last[idx]);
+                            // (1 - (l_last(X) + l_blind(X))) * (z(\omega X) (s(X) + \gamma) - z(X) (a(X) + \gamma)) = 0
+                            *value = *value * y
+                                + l_active_row[idx]
+                                    * (product_coset[r_next] * shuffle_value
+                                        - product_coset[idx] * input_value)
+                        }
+                    });
+                }
             }
-            log::trace!(" - Shuffle constraints: {:?}", start.elapsed());
         }
         values
     }
@@ -1088,7 +1343,8 @@ impl<C: CurveAffine> GraphEvaluator<C> {
     ) -> C::ScalarExt {
         // All rotation index values
         for (rot_idx, rot) in self.rotations.iter().enumerate() {
-            data.rotations[rot_idx] = get_rotation_idx(idx, *rot, rot_scale, isize);
+            let idx = get_rotation_idx(idx, *rot, rot_scale, isize);
+            data.rotations[rot_idx] = idx;
         }
 
         // All calculations, with cached intermediate results

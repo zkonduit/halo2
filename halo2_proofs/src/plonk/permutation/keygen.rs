@@ -1,5 +1,6 @@
 use ff::{Field, PrimeField};
 use group::Curve;
+use icicle_runtime::stream::IcicleStream;
 
 use super::{Argument, ProvingKey, VerifyingKey};
 use crate::{
@@ -168,7 +169,7 @@ impl Assembly {
             columns: p.columns.clone(),
             cycles: Vec::with_capacity(n),
             ordered_cycles: Vec::with_capacity(n),
-            aux: HashMap::new(),
+            aux: HashMap::default(),
             col_len: n,
             num_cols: p.columns.len(),
         }
@@ -241,7 +242,7 @@ impl Assembly {
     /// Builds the ordered mapping of the cycles.
     /// This will only get executed once.
     pub fn build_ordered_mapping(&mut self) {
-        use crate::multicore::IntoParallelRefMutIterator;
+        use maybe_rayon::prelude::IntoParallelRefMutIterator;
 
         // will only get called once
         if self.ordered_cycles.is_empty() && !self.cycles.is_empty() {
@@ -384,7 +385,7 @@ pub(crate) fn build_pk<'params, C: CurveAffine, P: Params<'params, C>>(
             for (x, coset) in o.iter_mut().enumerate() {
                 let i = start + x;
                 let poly = polys[i].clone();
-                *coset = domain.coeff_to_extended(&poly);
+                *coset = domain.coeff_to_extended(&poly, &IcicleStream::default());
             }
         });
     }

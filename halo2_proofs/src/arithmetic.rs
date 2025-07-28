@@ -1,10 +1,7 @@
 //! This module provides common utilities, traits and structures for group,
 //! field and polynomial arithmetic.
 
-#[cfg(feature = "icicle_gpu")]
 use super::icicle;
-#[cfg(feature = "icicle_gpu")]
-use std::env;
 use super::multicore;
 pub use ff::Field;
 use group::{
@@ -12,6 +9,9 @@ use group::{
     prime::PrimeCurveAffine,
     Curve, GroupOpsOwned, ScalarMulOwned,
 };
+use icicle_bn254::curve::CurveCfg;
+use icicle_core::curve::Affine;
+use icicle_runtime::memory::DeviceSlice;
 
 use halo2curves::msm::msm_best;
 pub use halo2curves::{CurveAffine, CurveExt};
@@ -32,38 +32,9 @@ where
 }
 
 /// Best MSM
-pub fn best_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
-    #[cfg(feature = "icicle_gpu")]
-    if env::var("ENABLE_ICICLE_GPU").is_ok()
-        && !icicle::should_use_cpu_msm(coeffs.len())
-        && icicle::is_gpu_supported_field(&coeffs[0])
-    {
-        return best_multiexp_gpu(coeffs, bases);
-    }
-
-    #[cfg(feature = "metal")]
-    {
-        use mopro_msm::metal::abstraction::limbs_conversion::h2c::{H2Fr, H2GAffine, H2G};
-        use std::sync::Once;
-
-        // Static mutex to block concurrent Metal acceleration calls
-        static PRINT_ONCE: Once = Once::new();
-
-        // Print the warning message only once
-        PRINT_ONCE.call_once(|| {
-            log::warn!(
-                "WARNING: Using Experimental Metal Acceleration for MSM. \
-                 Best performance improvements are observed with log row size >= 20. \
-                 Current log size: {}",
-                coeffs.len().ilog2()
-            );
-        });
-
-        // Perform MSM using Metal acceleration
-        return mopro_msm::metal::msm_best::<C, H2GAffine, H2G, H2Fr>(coeffs, bases);
-    }
-
-    #[allow(unreachable_code)]
+pub fn best_multiexp<C: CurveAffine>(
+    coeffs: &[C::Scalar], bases: &[C]
+) -> C::Curve {
     best_multiexp_cpu(coeffs, bases)
 }
 
@@ -77,21 +48,9 @@ pub fn best_multiexp_cpu<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C
     msm_best(coeffs, bases)
 }
 
-#[cfg(feature = "icicle_gpu")]
 /// Performs a multi-exponentiation operation on GPU using Icicle library
-pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], g: &[C]) -> C::Curve {
-    icicle::multiexp_on_device::<C>(coeffs, g)
-}
-
-/// Dispatcher
-pub fn best_fft_cpu<Scalar: Field, G: FftGroup<Scalar>>(
-    a: &mut [G],
-    omega: Scalar,
-    log_n: u32,
-    data: &FFTData<Scalar>,
-    inverse: bool,
-) {
-    fft::fft(a, omega, log_n, data, inverse);
+pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], g: &DeviceSlice<Affine<CurveCfg>>, stream: &IcicleStream) -> C::Curve {
+    icicle::multiexp_on_device::<C>(coeffs, g, stream)
 }
 
 /// Best FFT
@@ -102,30 +61,12 @@ pub fn best_fft<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeF
     data: &FFTData<Scalar>,
     inverse: bool,
 ) {
-    #[cfg(feature = "icicle_gpu")]
-    if env::var("ENABLE_ICICLE_GPU").is_ok()
-        && !icicle::should_use_cpu_fft(scalars.len())
-        && icicle::is_gpu_supported_field(&omega)
+    if !icicle::should_use_cpu_fft(scalars.len()) && icicle::is_gpu_supported_field(&omega)
     {
-        best_fft_gpu(scalars, omega, log_n, inverse);
+        icicle::fft_on_device::<Scalar, G>(scalars, inverse, &IcicleStream::default());
     } else {
-        best_fft_cpu(scalars, omega, log_n, data, inverse);
+        fft::fft(scalars, omega, log_n, data, inverse);
     }
-
-    #[cfg(not(feature = "icicle_gpu"))]
-    best_fft_cpu(scalars, omega, log_n, data, inverse);
-}
-
-/// Performs a NTT operation on GPU using Icicle library
-#[cfg(feature = "icicle_gpu")]
-pub fn best_fft_gpu<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeField>(
-    a: &mut [G],
-    omega: Scalar,
-    log_n: u32,
-    inverse: bool,
-) {
-    println!("icicle_fft");
-    icicle::fft_on_device::<Scalar, G>(a, omega, log_n, inverse);
 }
 
 /// Convert coefficient bases group elements to lagrange basis by inverse FFT.
@@ -141,7 +82,7 @@ pub fn g_to_lagrange<C: PrimeCurveAffine>(g_projective: Vec<C::Curve>, k: u32) -
     let n = g_lagrange_projective.len();
     let fft_data = FFTData::new(n, omega, omega_inv);
 
-    best_fft_cpu(&mut g_lagrange_projective, omega_inv, k, &fft_data, true);
+    fft::fft(&mut g_lagrange_projective, omega_inv, k, &fft_data, true);
     parallelize(&mut g_lagrange_projective, |g, _| {
         for g in g.iter_mut() {
             *g *= n_inv;
@@ -381,6 +322,7 @@ pub fn bitreverse(mut n: usize, l: usize) -> usize {
     r
 }
 
+use icicle_runtime::stream::IcicleStream;
 #[cfg(test)]
 use rand_core::OsRng;
 

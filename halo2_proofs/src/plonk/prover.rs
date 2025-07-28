@@ -109,7 +109,6 @@ where
         pub instance_polys: Vec<Polynomial<C::Scalar, Coeff>>,
     }
 
-    let start = Instant::now();
     let instance: Vec<InstanceSingle<Scheme::Curve>> = instances
         .iter()
         .map(|instance| -> Result<InstanceSingle<Scheme::Curve>, Error> {
@@ -164,7 +163,6 @@ where
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    log::trace!("Instance preparation: {:?}", start.elapsed());
 
     #[derive(Clone)]
     struct AdviceSingle<C: CurveAffine, B: Basis> {
@@ -317,7 +315,6 @@ where
         }
     }
 
-    let start = Instant::now();
     let (advice, challenges) = {
         let mut advice = vec![
             AdviceSingle::<Scheme::Curve, LagrangeCoeff> {
@@ -329,7 +326,6 @@ where
         let s = FxBuildHasher;
         let mut challenges =
             HashMap::<usize, Scheme::Scalar>::with_capacity_and_hasher(meta.num_challenges, s);
-
         let unusable_rows_start = params.n() as usize - (meta.blinding_factors() + 1);
         for current_phase in pk.vk.cs.phases() {
             let _start = Instant::now();
@@ -345,11 +341,9 @@ where
                     }
                 })
                 .collect::<BTreeSet<_>>();
-
             for ((circuit, advice), instances) in
                 circuits.iter().zip(advice.iter_mut()).zip(instances)
             {
-                let _start = Instant::now();
                 let mut witness = WitnessCollection {
                     k: params.k(),
                     current_phase,
@@ -365,7 +359,6 @@ where
                     _marker: std::marker::PhantomData,
                 };
 
-                let _start = Instant::now();
                 // Synthesize the circuit to obtain the witness and other information.
                 ConcreteCircuit::FloorPlanner::synthesize(
                     &mut witness,
@@ -374,7 +367,6 @@ where
                     meta.constants.clone(),
                 )?;
 
-                let _start = Instant::now();
                 let mut advice_values = batch_invert_assigned::<Scheme::Scalar>(
                     witness
                         .advice
@@ -390,7 +382,6 @@ where
                         .collect(),
                 );
 
-                let _start = Instant::now();
                 // Add blinding factors to advice columns
                 for (column_index, advice_values) in column_indices.iter().zip(&mut advice_values) {
                     if !witness.unblinded_advice.contains(column_index) {
@@ -404,7 +395,6 @@ where
                     }
                 }
 
-                let _start = Instant::now();
                 // Compute commitments to advice column polynomials
                 let blinds: Vec<_> = column_indices
                     .iter()
@@ -416,6 +406,7 @@ where
                         }
                     })
                     .collect();
+
                 let advice_commitments_projective: Vec<_> = advice_values
                     .iter()
                     .zip(blinds.iter())
@@ -430,7 +421,6 @@ where
                 let advice_commitments = advice_commitments;
                 drop(advice_commitments_projective);
 
-                let _start = Instant::now();
                 for commitment in &advice_commitments {
                     transcript.write_point(*commitment)?;
                 }
@@ -441,7 +431,6 @@ where
                     advice.advice_blinds[*column_index] = blind;
                 }
             }
-
             for (index, phase) in meta.challenge_phase.iter().enumerate() {
                 if current_phase == *phase {
                     let existing =
@@ -458,14 +447,9 @@ where
 
         (advice, challenges)
     };
-    log::trace!("Advice preparation: {:?}", start.elapsed());
 
     // Sample theta challenge for keeping lookup columns linearly independent
-    let start = Instant::now();
     let theta: ChallengeTheta<_> = transcript.squeeze_challenge_scalar();
-    log::trace!("Theta challenge: {:?}", start.elapsed());
-
-    let start = Instant::now();
 
     #[cfg(feature = "mv-lookup")]
     let lookups: Vec<Vec<lookup::prover::Prepared<Scheme::Curve>>> = instance
@@ -529,20 +513,13 @@ where
                 .collect()
         })
         .collect::<Result<Vec<_>, _>>()?;
-    log::trace!("Lookup preparation: {:?}", start.elapsed());
 
     // Sample beta challenge
-    let start = Instant::now();
     let beta: ChallengeBeta<_> = transcript.squeeze_challenge_scalar();
-    log::trace!("Beta challenge: {:?}", start.elapsed());
 
     // Sample gamma challenge
-    let start = Instant::now();
     let gamma: ChallengeGamma<_> = transcript.squeeze_challenge_scalar();
-    log::trace!("Gamma challenge: {:?}", start.elapsed());
 
-    // Commit to permutations.
-    let start = Instant::now();
     let permutations: Vec<permutation::prover::Committed<Scheme::Curve>> = instance
         .iter()
         .zip(advice.iter())
@@ -561,7 +538,6 @@ where
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    log::trace!("Permutation commitment: {:?}", start.elapsed());
 
     // preallocate the lookups
 
@@ -573,22 +549,13 @@ where
     #[cfg(feature = "mv-lookup")]
     let commit_lookups = || -> Result<Vec<Vec<lookup::prover::Committed<Scheme::Curve>>>, _> {
         lookups
-            .into_iter()
+            .into_par_iter()
             .map(|lookups| -> Result<Vec<_>, _> {
                 // Construct and commit to products for each lookup
-                #[cfg(feature = "metal")]
-                let res = lookups
-                    .into_iter()
-                    .map(|lookup| lookup.commit_grand_sum(&pk.vk, params, beta, &phi_blinds))
-                    .collect::<Result<Vec<_>, _>>();
-
-                #[cfg(not(feature = "metal"))]
-                let res = lookups
+                lookups
                     .into_par_iter()
                     .map(|lookup| lookup.commit_grand_sum(&pk.vk, params, beta, &phi_blinds))
-                    .collect::<Result<Vec<_>, _>>();
-
-                res
+                    .collect::<Result<Vec<_>, _>>()
             })
             .collect::<Result<Vec<_>, _>>()
     };
@@ -609,7 +576,6 @@ where
             .collect::<Result<Vec<_>, _>>()
     };
 
-    let start = Instant::now();
     let lookups = commit_lookups()?;
 
     #[cfg(feature = "mv-lookup")]
@@ -621,9 +587,6 @@ where
         }
     }
 
-    log::trace!("Lookup commitment: {:?}", start.elapsed());
-
-    let start = Instant::now();
     let shuffles: Vec<Vec<shuffle::prover::Committed<Scheme::Curve>>> = instance
         .iter()
         .zip(advice.iter())
@@ -651,20 +614,13 @@ where
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
-    log::trace!("Shuffle commitment: {:?}", start.elapsed());
 
-    let start = Instant::now();
     // Commit to the vanishing argument's random polynomial for blinding h(x_3)
     let vanishing = vanishing::Argument::commit(params, domain, &mut rng, transcript)?;
-    log::trace!("Vanishing commitment: {:?}", start.elapsed());
 
     // Obtain challenge for keeping all separate gates linearly independent
-    let start = Instant::now();
     let y: ChallengeY<_> = transcript.squeeze_challenge_scalar();
-    log::trace!("Y challenge: {:?}", start.elapsed());
 
-    // Calculate the advice polys
-    let start = Instant::now();
     let advice: Vec<AdviceSingle<Scheme::Curve, Coeff>> = advice
         .into_iter()
         .map(
@@ -682,10 +638,7 @@ where
             },
         )
         .collect();
-    log::trace!("Advice calculation: {:?}", start.elapsed());
 
-    // Evaluate the h(X) polynomial
-    let start = Instant::now();
     let h_poly = pk.ev.evaluate_h(
         pk,
         &advice
@@ -705,19 +658,12 @@ where
         &shuffles,
         &permutations,
     );
-    log::trace!("H(X) evaluation: {:?}", start.elapsed());
 
-    // Construct the vanishing argument's h(X) commitments
-    let start = Instant::now();
     let vanishing = vanishing.construct(params, domain, h_poly, &mut rng, transcript)?;
-    log::trace!("Vanishing construction: {:?}", start.elapsed());
 
-    let start = Instant::now();
     let x: ChallengeX<_> = transcript.squeeze_challenge_scalar();
     let xn = x.pow([params.n()]);
-    log::trace!("X challenge: {:?}", start.elapsed());
 
-    let start = Instant::now();
     if P::QUERY_INSTANCE {
         // Compute and hash instance evals for each circuit instance
         for instance in instance.iter() {
@@ -739,15 +685,13 @@ where
             }
         }
     }
-    log::trace!("Instance evaluation: {:?}", start.elapsed());
 
-    let start = Instant::now();
     // Compute and hash advice evals for each circuit instance
     for advice in advice.iter() {
         // Evaluate polynomials at omega^i x
         let advice_evals: Vec<_> = meta
             .advice_queries
-            .iter()
+            .par_iter()
             .map(|&(column, at)| {
                 eval_polynomial(
                     &advice.advice_polys[column.index()],
@@ -761,46 +705,33 @@ where
             transcript.write_scalar(*eval)?;
         }
     }
-    log::trace!("Advice evaluation: {:?}", start.elapsed());
 
-    let start = Instant::now();
     // Compute and hash fixed evals (shared across all circuit instances)
     let fixed_evals: Vec<_> = meta
         .fixed_queries
-        .iter()
+        .par_iter()
         .map(|&(column, at)| {
             eval_polynomial(&pk.fixed_polys[column.index()], domain.rotate_omega(*x, at))
         })
         .collect();
-    log::trace!("Fixed evaluation: {:?}", start.elapsed());
 
     // Hash each fixed column evaluation
-    let start = Instant::now();
     for eval in fixed_evals.iter() {
         transcript.write_scalar(*eval)?;
     }
-    log::trace!("Fixed evaluation hashing: {:?}", start.elapsed());
 
-    let start = Instant::now();
     let vanishing = vanishing.evaluate(x, xn, domain, transcript)?;
-    log::trace!("Vanishing evaluation: {:?}", start.elapsed());
 
     // Evaluate common permutation data
-    let start = Instant::now();
     pk.permutation.evaluate(x, transcript)?;
-    log::trace!("Permutation evaluation: {:?}", start.elapsed());
 
     // Evaluate the permutations, if any, at omega^i x.
-    let start = Instant::now();
     let permutations: Vec<permutation::prover::Evaluated<Scheme::Curve>> = permutations
         .into_iter()
         .map(|permutation| -> Result<_, _> { permutation.construct().evaluate(pk, x, transcript) })
         .collect::<Result<Vec<_>, _>>()?;
-    log::trace!("Permutation evaluation: {:?}", start.elapsed());
 
     // Evaluate the lookups, if any, at omega^i x.
-
-    let start = Instant::now();
 
     let lookups: Vec<Vec<lookup::prover::Evaluated<Scheme::Curve>>> = lookups
         .into_iter()
@@ -817,10 +748,8 @@ where
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
-    log::trace!("Lookup evaluation: {:?}", start.elapsed());
 
     // Evaluate the shuffles, if any, at omega^i x.
-    let start = Instant::now();
     let shuffles: Vec<Vec<shuffle::prover::Evaluated<Scheme::Curve>>> = shuffles
         .into_iter()
         .map(|shuffles| -> Result<Vec<_>, _> {
@@ -830,9 +759,7 @@ where
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
-    log::trace!("Shuffle evaluation: {:?}", start.elapsed());
 
-    let start = Instant::now();
     let instances = instance
         .iter()
         .zip(advice.iter())
@@ -882,7 +809,6 @@ where
         .chain(pk.permutation.open(x))
         // We query the h(X) polynomial at x
         .chain(vanishing.open(x));
-    log::trace!("Open queries: {:?}", start.elapsed());
 
     #[cfg(feature = "counter")]
     {

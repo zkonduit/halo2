@@ -1,9 +1,12 @@
 #![allow(clippy::int_plus_one)]
 
 use std::ops::Range;
+use std::sync::Arc;
 
 use ff::{Field, FromUniformBytes};
 use group::Curve;
+use icicle_runtime::stream::IcicleStream;
+use crate::{icicle::{device_vec_from_c_scalars, device_vec_from_poly_vec}, poly::ExtendedLagrangeCoeff};
 
 use super::{
     circuit::{
@@ -14,13 +17,11 @@ use super::{
     permutation, Assigned, Challenge, Error, LagrangeCoeff, Polynomial, ProvingKey, VerifyingKey,
 };
 use crate::{
-    arithmetic::{parallelize, CurveAffine},
-    circuit::Value,
-    poly::{
+    arithmetic::{parallelize, CurveAffine}, circuit::Value, poly::{
         batch_invert_assigned,
         commitment::{Blind, Params},
         EvaluationDomain,
-    },
+    }
 };
 
 pub(crate) fn create_domain<C, ConcreteCircuit>(
@@ -353,9 +354,9 @@ where
         .map(|poly| vk.domain.lagrange_to_coeff(poly.clone()))
         .collect();
 
-    let fixed_cosets = fixed_polys
+    let fixed_cosets: Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>> = fixed_polys
         .iter()
-        .map(|poly| vk.domain.coeff_to_extended(poly))
+        .map(|poly| vk.domain.coeff_to_extended(poly, &IcicleStream::default()))
         .collect();
 
     let permutation_pk = assembly
@@ -367,7 +368,7 @@ where
     let mut l0 = vk.domain.empty_lagrange();
     l0[0] = C::Scalar::ONE;
     let l0 = vk.domain.lagrange_to_coeff(l0);
-    let l0 = vk.domain.coeff_to_extended(&l0);
+    let l0 = vk.domain.coeff_to_extended(&l0, &IcicleStream::default());
 
     // Compute l_blind(X) which evaluates to 1 for each blinding factor row
     // and 0 otherwise over the domain.
@@ -376,14 +377,14 @@ where
         *evaluation = C::Scalar::ONE;
     }
     let l_blind = vk.domain.lagrange_to_coeff(l_blind);
-    let l_blind = vk.domain.coeff_to_extended(&l_blind);
+    let l_blind = vk.domain.coeff_to_extended(&l_blind, &IcicleStream::default());
 
     // Compute l_last(X) which evaluates to 1 on the first inactive row (just
     // before the blinding factors) and 0 otherwise over the domain
     let mut l_last = vk.domain.empty_lagrange();
     l_last[params.n() as usize - cs.blinding_factors() - 1] = C::Scalar::ONE;
     let l_last = vk.domain.lagrange_to_coeff(l_last);
-    let l_last = vk.domain.coeff_to_extended(&l_last);
+    let l_last = vk.domain.coeff_to_extended(&l_last, &IcicleStream::default());
 
     // Compute l_active_row(X)
     let one = C::Scalar::ONE;
@@ -398,6 +399,11 @@ where
     // Compute the optimized evaluation data structure
     let ev = Evaluator::new(&vk.cs);
 
+    let icicle_fixed = device_vec_from_poly_vec::<C, ExtendedLagrangeCoeff>(&fixed_cosets, &IcicleStream::default());
+    let icicle_l0 = device_vec_from_c_scalars(&l0.as_ref(), &IcicleStream::default());
+    let icicle_l_last = device_vec_from_c_scalars(&l_last.as_ref(), &IcicleStream::default());
+    let icicle_l_active_row = device_vec_from_c_scalars(&l_active_row.as_ref(), &IcicleStream::default());
+
     Ok(ProvingKey {
         vk,
         l0,
@@ -406,6 +412,10 @@ where
         fixed_values: fixed,
         fixed_polys,
         fixed_cosets,
+        icicle_fixed: Arc::new(icicle_fixed),
+        icicle_l0: Arc::new(icicle_l0),
+        icicle_l_last: Arc::new(icicle_l_last),
+        icicle_l_active_row: Arc::new(icicle_l_active_row),
         permutation: permutation_pk,
         ev,
     })

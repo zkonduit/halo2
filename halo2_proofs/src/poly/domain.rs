@@ -2,16 +2,16 @@
 //! domain that is of a suitable size for the application.
 
 use crate::{
-    arithmetic::{best_fft, parallelize},
-    fft::recursive::FFTData,
-    plonk::Assigned,
+    arithmetic::{best_fft, parallelize}, fft::recursive::FFTData, icicle::{fft_on_device, fft_on_device_vec, icicle_scalars_from_c_scalars}, plonk::Assigned
 };
 
 use super::{Coeff, ExtendedLagrangeCoeff, LagrangeCoeff, Polynomial, Rotation};
 
 use group::ff::{BatchInvert, Field, WithSmallOrderMulGroup};
+use icicle_bn254::curve::ScalarField;
+use icicle_core::ntt::{initialize_domain, NTTInitDomainConfig};
+use icicle_runtime::{memory::DeviceVec, stream::IcicleStream};
 use maybe_rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-
 use std::{collections::HashMap, marker::PhantomData};
 
 /// This structure contains precomputed constants and other details needed for
@@ -29,7 +29,6 @@ pub struct EvaluationDomain<F: Field> {
     g_coset: F,
     g_coset_inv: F,
     quotient_poly_degree: u64,
-    ifft_divisor: F,
     extended_ifft_divisor: F,
     t_evaluations: Vec<F>,
     barycentric_weight: F,
@@ -154,6 +153,10 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
             })
             .collect::<HashMap<usize, FFTData<F>>>();
 
+        let cfg = NTTInitDomainConfig::default();
+        let icicle_omega = icicle_scalars_from_c_scalars(&[extended_omega]);
+        initialize_domain(icicle_omega[0], &cfg).unwrap();
+
         EvaluationDomain {
             n,
             k,
@@ -165,7 +168,6 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
             g_coset,
             g_coset_inv,
             quotient_poly_degree,
-            ifft_divisor,
             extended_ifft_divisor,
             t_evaluations,
             barycentric_weight,
@@ -321,7 +323,17 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
         assert_eq!(a.values.len(), 1 << self.k);
 
         // Perform inverse FFT to obtain the polynomial in coefficient form
-        self.ifft(&mut a.values, self.omega_inv, self.k, self.ifft_divisor);
+        fft_on_device(&mut a.values, true, &IcicleStream::default());
+
+        Polynomial::from_vec(a.values)
+    }
+
+    ///stream
+    pub fn lagrange_to_coeff_stream(&self, mut a: Polynomial<F, LagrangeCoeff>, stream: &IcicleStream) -> Polynomial<F, Coeff> {
+        assert_eq!(a.values.len(), 1 << self.k);
+
+        // Perform inverse FFT to obtain the polynomial in coefficient form
+        fft_on_device(&mut a.values, true, stream);
 
         Polynomial {
             values: a.values,
@@ -334,22 +346,38 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
     pub fn coeff_to_extended(
         &self,
         p: &Polynomial<F, Coeff>,
+        stream: &IcicleStream,
     ) -> Polynomial<F, ExtendedLagrangeCoeff> {
         assert_eq!(p.values.len(), 1 << self.k);
-
         let mut a = Vec::with_capacity(self.extended_len());
         a.extend(&p.values);
 
         self.distribute_powers_zeta(&mut a, true);
-        a.resize(self.extended_len(), F::ZERO);
-        self.fft_inner(&mut a, self.extended_omega, self.extended_k, false);
 
-        Polynomial {
-            values: a,
-            _marker: PhantomData,
-        }
+        a.resize(self.extended_len(), F::ZERO);
+
+        fft_on_device(&mut a, false, stream);
+
+        Polynomial::from_vec(a)
     }
 
+    /// This takes us from an n-length coefficient vector into a coset of the extended
+    /// evaluation domain, rotating by `rotation` if desired.
+    pub fn coeff_to_extended_device_vec(
+        &self,
+        p: &Polynomial<F, Coeff>,
+        stream: &IcicleStream,
+    ) -> DeviceVec<ScalarField> {
+        assert_eq!(p.values.len(), 1 << self.k);
+        let mut a = Vec::with_capacity(self.extended_len());
+        a.extend(&p.values);
+
+        self.distribute_powers_zeta(&mut a, true);
+
+        a.resize(self.extended_len(), F::ZERO);
+
+        fft_on_device_vec(&mut a, false, stream)
+    }
     /// This takes us from an n-length coefficient vector into parts of the
     /// extended evaluation domain. For example, for a polynomial with size n,
     /// and an extended domain of size mn, we can compute all parts
@@ -454,13 +482,7 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
     pub fn extended_to_coeff(&self, mut a: Polynomial<F, ExtendedLagrangeCoeff>) -> Vec<F> {
         assert_eq!(a.values.len(), self.extended_len());
 
-        // Inverse FFT
-        self.ifft(
-            &mut a.values,
-            self.extended_omega_inv,
-            self.extended_k,
-            self.extended_ifft_divisor,
-        );
+        fft_on_device(&mut a.values, true, &IcicleStream::default());
 
         // Distribute powers to move from coset; opposite from the
         // transformation we performed earlier.
@@ -612,11 +634,6 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
                 *a *= &divisor;
             }
         });
-    }
-
-    fn fft_inner(&self, a: &mut [F], omega: F, log_n: u32, inverse: bool) {
-        let fft_data = self.get_fft_data(a.len());
-        best_fft(a, omega, log_n, fft_data, inverse)
     }
 
     /// Get the size of the domain
@@ -840,7 +857,7 @@ fn test_coeff_to_extended_part() {
         *value = Scalar::random(rng);
     }
 
-    let want = domain.coeff_to_extended(&poly);
+    let want = domain.coeff_to_extended(&poly, &IcicleStream::default());
     let got = {
         let parts = domain.coeff_to_extended_parts(&poly);
         domain.lagrange_vec_to_extended(parts)
@@ -867,7 +884,7 @@ fn bench_coeff_to_extended_parts() {
     let poly2 = poly1.clone();
 
     let coeff_to_extended_timer = Instant::now();
-    let _ = domain.coeff_to_extended(&poly1);
+    let _ = domain.coeff_to_extended(&poly1, &IcicleStream::default());
     println!(
         "domain.coeff_to_extended time: {}s",
         coeff_to_extended_timer.elapsed().as_secs_f64()

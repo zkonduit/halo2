@@ -6,17 +6,22 @@ use crate::helpers::SerdeCurveAffine;
 use crate::plonk::evaluation::evaluate;
 use crate::SerdeFormat;
 use crate::{
-    arithmetic::{eval_polynomial, parallelize, CurveAffine},
+    arithmetic::{eval_polynomial, CurveAffine},
     poly::{
         commitment::{Blind, Params},
         Coeff, EvaluationDomain, LagrangeCoeff, Polynomial, ProverQuery, Rotation,
     },
     transcript::{EncodedChallenge, TranscriptWrite},
+    icicle::{c_scalars_from_device_vec, device_vec_from_c_scalars, icicle_scalars_from_c_scalars, inplace_add, inplace_invert, inplace_mul, inplace_scalar_add, inplace_sub},
 };
 use ff::WithSmallOrderMulGroup;
 use group::{
-    ff::{BatchInvert, Field},
+    ff::Field,
     Curve,
+};
+use icicle_runtime::{
+    memory::{DeviceVec, HostSlice},
+    stream::IcicleStream,
 };
 use rustc_hash::FxHashMap as HashMap;
 
@@ -26,6 +31,7 @@ use std::{
     ops::{Mul, MulAssign},
 };
 
+
 #[derive(Debug)]
 pub(in crate::plonk) struct Prepared<C: CurveAffine> {
     compressed_inputs_expressions: Vec<Polynomial<C::Scalar, LagrangeCoeff>>,
@@ -34,7 +40,6 @@ pub(in crate::plonk) struct Prepared<C: CurveAffine> {
     pub(in crate::plonk) commitment: C,
 }
 
-#[derive(Debug)]
 pub(in crate::plonk) struct Committed<C: CurveAffine> {
     pub(in crate::plonk) m_poly: Polynomial<C::Scalar, Coeff>,
     pub(in crate::plonk) phi_poly: Polynomial<C::Scalar, Coeff>,
@@ -218,9 +223,8 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
         }
 
         // commit to m(X)
-        let blind = Blind(C::Scalar::ZERO);
         let start = instant::Instant::now();
-        let m_commitment = params.commit_lagrange(&m_values, blind.clone()).to_affine();
+        let m_commitment = params.commit_lagrange(&m_values, Blind::default()).to_affine();
         log::trace!("m_commitment {:?}", start.elapsed());
 
         // write commitment of m(X) to transcript
@@ -251,70 +255,36 @@ impl<C: CurveAffine> Prepared<C> {
         */
 
         let start = instant::Instant::now();
+        let mut stream = IcicleStream::create().unwrap();
+        let icicle_beta = device_vec_from_c_scalars(&[*beta], &stream);
+
         // ∑ 1/(φ_i(X))
-        let mut inputs_log_derivatives = vec![C::Scalar::ZERO; params.n() as usize];
+        let inputs_log_derivatives = vec![C::Scalar::ZERO; params.n() as usize];
+        let mut d_inputs_log_derivatives = device_vec_from_c_scalars(&inputs_log_derivatives, &stream);
+        let mut d_temp = DeviceVec::device_malloc(params.n() as usize).unwrap();
+        let mut d_m_values = device_vec_from_c_scalars(&self.m_values, &stream);
+        let mut d_compressed_table_expression = device_vec_from_c_scalars(&self.compressed_table_expression, &stream);
+        
         for compressed_input_expression in self.compressed_inputs_expressions.iter() {
-            let mut input_log_derivatives = vec![C::Scalar::ZERO; params.n() as usize];
+            let icicle_compressed_input_expression = icicle_scalars_from_c_scalars(compressed_input_expression);
+            let h_icicle_compressed_input_expression = HostSlice::from_slice(&icicle_compressed_input_expression);
+            d_temp.copy_from_host_async(h_icicle_compressed_input_expression, &stream).unwrap();
 
-            parallelize(
-                &mut input_log_derivatives,
-                |input_log_derivatives, start| {
-                    for (input_log_derivative, fi) in input_log_derivatives
-                        .iter_mut()
-                        .zip(compressed_input_expression[start..].iter())
-                    {
-                        *input_log_derivative = *beta + fi;
-                    }
-                },
-            );
-            input_log_derivatives.iter_mut().batch_invert();
-
-            // TODO: remove last blinders from this
-            for i in 0..params.n() as usize {
-                inputs_log_derivatives[i] += input_log_derivatives[i];
-            }
+            inplace_scalar_add(&mut d_temp, &icicle_beta, &stream);
+            inplace_invert(&mut d_temp, &stream);
+            inplace_add(&mut d_inputs_log_derivatives, &d_temp, &stream);
         }
+        
+        inplace_scalar_add(&mut d_compressed_table_expression, &icicle_beta, &stream);
+        inplace_invert(&mut d_compressed_table_expression, &stream);
+                
+        inplace_mul(&mut d_m_values, &d_compressed_table_expression, &stream);
+        inplace_sub(&mut d_inputs_log_derivatives, &d_m_values, &stream);
 
-        log::trace!(" - inputs_log_derivatives {:?}", start.elapsed());
+        let log_derivatives_diff: Vec<C::Scalar> = c_scalars_from_device_vec(&mut d_inputs_log_derivatives, &stream);
 
-        let start = instant::Instant::now();
-        // 1 / τ(X)
-        let mut table_log_derivatives = vec![C::Scalar::ZERO; params.n() as usize];
-        parallelize(
-            &mut table_log_derivatives,
-            |table_log_derivatives, start| {
-                for (table_log_derivative, ti) in table_log_derivatives
-                    .iter_mut()
-                    .zip(self.compressed_table_expression[start..].iter())
-                {
-                    *table_log_derivative = *beta + ti;
-                }
-            },
-        );
-
-        log::trace!(" - table_log_derivatives {:?}", start.elapsed());
-
-        let start = instant::Instant::now();
-        table_log_derivatives.iter_mut().batch_invert();
-        log::trace!(
-            " - table_log_derivatives batch_invert {:?}",
-            start.elapsed()
-        );
-
-        let start = instant::Instant::now();
-        // (Σ 1/(φ_i(X)) - m(X) / τ(X))
-        let mut log_derivatives_diff = vec![C::Scalar::ZERO; params.n() as usize];
-        parallelize(&mut log_derivatives_diff, |log_derivatives_diff, start| {
-            for (((log_derivative_diff, fi), ti), mi) in log_derivatives_diff
-                .iter_mut()
-                .zip(inputs_log_derivatives[start..].iter())
-                .zip(table_log_derivatives[start..].iter())
-                .zip(self.m_values[start..].iter())
-            {
-                // (Σ 1/(φ_i(X)) - m(X) / τ(X))
-                *log_derivative_diff = *fi - *mi * *ti;
-            }
-        });
+        stream.synchronize().unwrap();
+        stream.destroy().unwrap();
 
         log::trace!(" - log_derivatives_diff {:?}", start.elapsed());
 
@@ -407,16 +377,22 @@ impl<C: CurveAffine> Prepared<C> {
         let grand_sum_blind = Blind(C::Scalar::ZERO);
         let start = instant::Instant::now();
         let phi_commitment = params
-            .commit_lagrange(&phi, grand_sum_blind.clone())
+            .commit_lagrange_with_stream(&phi, grand_sum_blind, &stream)
             .to_affine();
         log::trace!(" - phi_commitment {:?}", start.elapsed());
 
         // Hash grand sum commitment
         // transcript.write_point(phi_commitment)?;
 
+        let m_poly = vk.domain.lagrange_to_coeff_stream(self.m_values, &stream);
+        let phi_poly = vk.domain.lagrange_to_coeff_stream(phi, &stream);
+
+        stream.synchronize().unwrap();
+        stream.destroy().unwrap();
+
         Ok(Committed {
-            m_poly: vk.domain.lagrange_to_coeff(self.m_values),
-            phi_poly: vk.domain.lagrange_to_coeff(phi),
+            m_poly,
+            phi_poly,
             commitment: phi_commitment,
         })
     }

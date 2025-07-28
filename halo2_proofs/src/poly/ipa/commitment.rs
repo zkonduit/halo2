@@ -11,12 +11,12 @@ use crate::poly::{Coeff, LagrangeCoeff, Polynomial};
 
 use group::{Curve, Group};
 use std::marker::PhantomData;
-
 mod prover;
 mod verifier;
 
 pub use prover::create_proof;
 pub use verifier::verify_proof;
+use icicle_runtime::stream::IcicleStream;
 
 use std::io;
 
@@ -89,6 +89,24 @@ impl<'params, C: CurveAffine> Params<'params, C> for ParamsIPA<C> {
         &self,
         poly: &Polynomial<C::Scalar, LagrangeCoeff>,
         r: Blind<C::Scalar>,
+    ) -> C::Curve {
+        let mut tmp_scalars = Vec::with_capacity(poly.len() + 1);
+        let mut tmp_bases = Vec::with_capacity(poly.len() + 1);
+
+        tmp_scalars.extend(poly.iter());
+        tmp_scalars.push(r.0);
+
+        tmp_bases.extend(self.g_lagrange.iter());
+        tmp_bases.push(self.w);
+
+        best_multiexp::<C>(&tmp_scalars, &tmp_bases)
+    }
+
+    fn commit_lagrange_with_stream(
+        &self,
+        poly: &Polynomial<C::Scalar, LagrangeCoeff>,
+        r: Blind<C::Scalar>,
+        _: &IcicleStream,
     ) -> C::Curve {
         let mut tmp_scalars = Vec::with_capacity(poly.len() + 1);
         let mut tmp_bases = Vec::with_capacity(poly.len() + 1);

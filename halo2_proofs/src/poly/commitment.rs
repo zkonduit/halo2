@@ -3,6 +3,7 @@ use super::{
     strategy::Guard,
     Coeff, LagrangeCoeff, Polynomial,
 };
+use icicle_runtime::stream::IcicleStream;
 use crate::transcript::{EncodedChallenge, TranscriptRead, TranscriptWrite};
 use crate::{helpers::SerdePrimeField, poly::Error};
 use ff::Field;
@@ -65,6 +66,14 @@ pub trait Params<'params, C: CurveAffine>: Sized + Clone {
         &self,
         poly: &Polynomial<C::ScalarExt, LagrangeCoeff>,
         r: Blind<C::ScalarExt>,
+    ) -> C::CurveExt;
+
+    /// This commits to a polynomial using its evaluations over the $2^k$ size
+    fn commit_lagrange_with_stream(
+        &self,
+        poly: &Polynomial<C::ScalarExt, LagrangeCoeff>,
+        r: Blind<C::ScalarExt>,
+        stream: &IcicleStream,
     ) -> C::CurveExt;
 
     /// Writes params to a buffer.

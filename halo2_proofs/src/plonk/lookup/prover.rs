@@ -4,6 +4,7 @@ use super::super::{
 };
 use super::Argument;
 use crate::helpers::SerdeCurveAffine;
+use crate::icicle::icicle_invert;
 use crate::plonk::evaluation::evaluate;
 use crate::SerdeFormat;
 use crate::{
@@ -233,6 +234,7 @@ impl<C: CurveAffine> Permuted<C> {
         mut rng: R,
         transcript: &mut T,
     ) -> Result<Committed<C>, Error> {
+        let mut stream = IcicleStream::create().unwrap();
         let blinding_factors = pk.vk.cs.blinding_factors();
         // Goal is to compute the products of fractions
         //
@@ -259,7 +261,7 @@ impl<C: CurveAffine> Permuted<C> {
 
         // Batch invert to obtain the denominators for the lookup product
         // polynomials
-        lookup_product.iter_mut().batch_invert();
+        lookup_product = icicle_invert(&lookup_product, &stream);
 
         // Finish the computation of the entire fraction by computing the numerators
         // (\theta^{m-1} a_0(\omega^i) + \theta^{m-2} a_1(\omega^i) + ... + \theta a_{m-2}(\omega^i) + a_{m-1}(\omega^i) + \beta)
@@ -342,11 +344,15 @@ impl<C: CurveAffine> Permuted<C> {
         }
 
         let product_blind = Blind(C::Scalar::random(rng));
-        let product_commitment = params.commit_lagrange(&z, product_blind).to_affine();
-        let z = pk.vk.domain.lagrange_to_coeff(z);
+        let product_commitment = params.commit_lagrange_with_stream(&z, product_blind, &stream).to_affine();
+        let z = pk.vk.domain.lagrange_to_coeff_stream(z, &stream);
 
+        stream.synchronize().unwrap();
+        stream.destroy().unwrap();
+        
         // Hash product commitment
         transcript.write_point(product_commitment)?;
+
 
         Ok(Committed::<C> {
             permuted_input_poly: self.permuted_input_poly,

@@ -1,23 +1,53 @@
-# halo2 [![Crates.io](https://img.shields.io/crates/v/halo2.svg)](https://crates.io/crates/halo2) #
+## Icicle Halo2 Usage Guide
 
-## [Documentation](https://privacy-scaling-explorations.github.io/halo2/halo2_proofs)
+This repository contains a ICICLE integration fork of [ezkl-halo2](https://github.com/zkonduit/halo2), designed for efficient proof generation using CUDA.
 
-For experimental features `privacy-scaling-explorations/halo2` fork adds, please refer to [`experimental-features.md`](./book/src/user/experimental-features.md).
+### Prerequisites
 
-## Minimum Supported Rust Version
+* **Environment Variable Setup**:
 
-Requires Rust **1.65.0** or higher.
+  Before running the CUDA backend, set the following environment variable:
 
-Minimum supported Rust version can be changed in the future, but it will be done with a
-minor version bump.
+  ```bash
+  export ICICLE_BACKEND_INSTALL_DIR=halo2/icicle/backend/cuda
+  ```
 
-## Controlling parallelism
+## Benchmarks
 
-`halo2` currently uses [rayon](https://github.com/rayon-rs/rayon) for parallel computation. The `RAYON_NUM_THREADS` environment variable can be used to set the number of threads.
+We benched the code on this setup:
+- 4080 & i9–13900K
 
-When compiling to WASM-targets, notice that since version `1.7`, `rayon` will fallback automatically (with no need to handle features) to require `getrandom` in order to be able to work. For more info related to WASM-compilation.
+We used the circuits in the MoPro’s benchmark repository to compare the proving systems.
 
-See: [Rayon: Usage with WebAssembly](https://github.com/rayon-rs/rayon#usage-with-webassembly) for more 
+- **Simple Lookup**: Defines a lookup table that doubles input values and verifies this relation using both a lookup constraint and a simple identity gate. 
+- **Plonk**: Implements a gate that supports both multiplication and addition. It repeatedly computes a^2 + a, verifies correctness using gate constraints.
+- **Lookups**:  Defines a lookup-heavy computation using a simple 8-bit lookup table and multiple redundant lookup constraints to inflate the degree of the constraint system.
+
+<p align="center">
+  <img src="./figures/lookups_ms_log_scale.png" alt="4090 Benchmark" width="45%">
+  <img src="./figures/lookups.png" alt="4080 Benchmark" width="45%">
+</p>
+
+<p align="center">
+  <img src="./figures/simple_ms_log_scale.png" alt="4090 Benchmark" width="45%">
+  <img src="./figures/simple.png" alt="4080 Benchmark" width="45%">
+</p>
+
+<p align="center">
+  <img src="./figures/plonk_ms_log_scale.png" alt="4090 Benchmark" width="45%">
+  <img src="./figures/plonk.png" alt="4080 Benchmark" width="45%">
+</p>
+
+## Reproducing the benchmarks
+
+We have used the existing benchmark circuits under the halo2 repository. You can reporduce the benchmarks by running 
+
+```bash
+cargo run --package halo2_proofs --example lookups
+cargo run --package halo2_proofs --example simple-lookup
+cargo run --package halo2_proofs --example plonk
+```
+
 
 ## License
 

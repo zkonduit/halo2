@@ -2,6 +2,7 @@ use super::super::{
     circuit::Expression, ChallengeGamma, ChallengeTheta, ChallengeX, Error, ProvingKey,
 };
 use super::Argument;
+use crate::icicle::icicle_invert;
 use crate::plonk::evaluation::evaluate;
 use crate::{
     arithmetic::{eval_polynomial, parallelize, CurveAffine},
@@ -11,8 +12,9 @@ use crate::{
     },
     transcript::{EncodedChallenge, TranscriptWrite},
 };
+use icicle_runtime::stream::IcicleStream;
 use ff::WithSmallOrderMulGroup;
-use group::{ff::BatchInvert, Curve};
+use group::Curve;
 use rand_core::RngCore;
 use std::{
     iter,
@@ -120,6 +122,7 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
         C: CurveAffine<ScalarExt = F>,
         C::Curve: Mul<F, Output = C::Curve> + MulAssign<F>,
     {
+        let mut stream = IcicleStream::create().unwrap();
         let compressed = self.compress(
             pk,
             params,
@@ -143,7 +146,7 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
             }
         });
 
-        shuffle_product.iter_mut().batch_invert();
+        shuffle_product = icicle_invert(&shuffle_product, &stream);
 
         parallelize(&mut shuffle_product, |product, start| {
             for (i, product) in product.iter_mut().enumerate() {
@@ -187,8 +190,11 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
         }
 
         let product_blind = Blind(C::Scalar::random(rng));
-        let product_commitment = params.commit_lagrange(&z, product_blind).to_affine();
-        let z = pk.vk.domain.lagrange_to_coeff(z);
+        let product_commitment = params.commit_lagrange_with_stream(&z, product_blind, &stream).to_affine();
+        let z = pk.vk.domain.lagrange_to_coeff_stream(z, &stream);
+        
+        stream.synchronize().unwrap();
+        stream.destroy().unwrap();
 
         // Hash product commitment
         transcript.write_point(product_commitment)?;
