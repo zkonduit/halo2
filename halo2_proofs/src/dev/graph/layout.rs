@@ -4,6 +4,7 @@ use plotters::{
     prelude::{DrawingArea, DrawingAreaErrorKind, DrawingBackend},
 };
 use rustc_hash::FxHashSet as HashSet;
+use rustc_hash::FxBuildHasher;
 use std::ops::Range;
 
 use crate::{
@@ -106,7 +107,7 @@ impl CircuitLayout {
             cs.constants.clone(),
         )
         .unwrap();
-        let (cs, selector_polys) = cs.compress_selectors(layout.selectors);
+        let (cs, selector_polys) = cs.compress_selectors(layout.selectors, false);
         let non_selector_fixed_columns = cs.num_fixed_columns - selector_polys.len();
 
         // Figure out what order to render the columns in.
@@ -257,7 +258,7 @@ impl CircuitLayout {
 
         // Mark equality-constrained cells.
         if self.mark_equality_cells {
-            let mut cells = HashSet::new();
+            let mut cells = HashSet::with_hasher(FxBuildHasher::default());
             for (l_col, l_row, r_col, r_row) in &layout.equality {
                 let l_col = column_index(&cs, (*l_col).into());
                 let r_col = column_index(&cs, (*r_col).into());
