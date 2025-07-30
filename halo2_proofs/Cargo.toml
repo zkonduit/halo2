@@ -98,6 +98,7 @@ getrandom = { version = "0.2", features = ["js"] }
 
 [features]
 default = ["batch", "bits", "derive_serde", "mv-lookup"]
+gpu-accelerated = []
 dev-graph = ["plotters", "tabbycat"]
 test-dev-graph = [
     "dev-graph",

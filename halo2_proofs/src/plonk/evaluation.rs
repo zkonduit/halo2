@@ -1,4 +1,7 @@
+#[cfg(feature = "gpu-accelerated")]
 use crate::icicle::{c_scalars_from_device_vec, create_calculation_data, create_gate_data, device_vec_from_c_scalars, inplace_invert, inplace_mul};
+#[cfg(not(feature = "gpu-accelerated"))]
+use crate::multicore;
 use crate::plonk::{permutation, Any, ProvingKey};
 
 #[cfg(feature = "mv-lookup")]
@@ -14,19 +17,28 @@ use crate::{
 };
 
 use group::ff::{Field, PrimeField, WithSmallOrderMulGroup};
+#[cfg(feature = "gpu-accelerated")]
 use icicle_bn254::curve::ScalarField;
+#[cfg(feature = "gpu-accelerated")]
 use icicle_core::{
     traits::FieldImpl,
     gate_ops::{GateData, LookupConfig, CalculationData, HornerData, GateOpsConfig, LookupData, gate_evaluation, lookups_constraint},
     vec_ops::{accumulate_scalars, VecOpsConfig}
 };
-use icicle_runtime::{
-    memory::{DeviceVec, HostOrDeviceSlice, HostSlice},
-    stream::IcicleStream,
-};
+use icicle_runtime::stream::IcicleStream;
+#[cfg(feature = "gpu-accelerated")]
+use icicle_runtime::memory::{DeviceVec, HostOrDeviceSlice, HostSlice};
+#[cfg(all(feature = "mv-lookup", not(feature = "gpu-accelerated")))]
+use maybe_rayon::iter::IndexedParallelIterator;
 use maybe_rayon::iter::IntoParallelRefIterator;
 use maybe_rayon::iter::ParallelIterator;
 use maybe_rayon::join;
+
+#[cfg(all(feature = "mv-lookup", not(feature = "gpu-accelerated")))]
+use ff::BatchInvert;
+
+#[cfg(all(feature = "mv-lookup", not(feature = "gpu-accelerated")))]
+use maybe_rayon::iter::IntoParallelRefMutIterator;
 
 use super::{shuffle, ConstraintSystem, Expression};
 
@@ -388,6 +400,7 @@ impl<C: CurveAffine> Evaluator<C> {
         let size = domain.extended_len();
         let rot_scale = 1 << (domain.extended_k() - domain.k());
         let fixed = &pk.fixed_cosets[..];
+        #[cfg(feature = "gpu-accelerated")]
         let icicle_fixed = &pk.icicle_fixed[..];
         let extended_omega = domain.get_extended_omega();
         let isize = size as i32;
@@ -395,8 +408,11 @@ impl<C: CurveAffine> Evaluator<C> {
         let l0 = &pk.l0;
         let l_last = &pk.l_last;
         let l_active_row = &pk.l_active_row;
+        #[cfg(feature = "gpu-accelerated")]
         let icicle_l0 = &pk.icicle_l0;
+        #[cfg(feature = "gpu-accelerated")]
         let icicle_l_last = &pk.icicle_l_last;
+        #[cfg(feature = "gpu-accelerated")]
         let icicle_l_active_row = &pk.icicle_l_active_row;
         let p = &pk.vk.cs.permutation;
 
@@ -443,6 +459,8 @@ impl<C: CurveAffine> Evaluator<C> {
                 },
             );
 
+            // GPU data creation - shared between custom gates and lookups
+            #[cfg(feature = "gpu-accelerated")]
             let (icicle_advice, icicle_instance, icicle_challenges, icicle_beta, icicle_gamma, icicle_theta, icicle_y) = create_gate_data::<C>(
                 &advice[..],
                 &instance[..],
@@ -453,31 +471,35 @@ impl<C: CurveAffine> Evaluator<C> {
                 y,
             );
 
+            #[cfg(feature = "gpu-accelerated")]
             let num_instance_rows = instance.len();
+            #[cfg(feature = "gpu-accelerated")]
             let num_advice_rows = advice.len();
+            #[cfg(feature = "gpu-accelerated")]
             let num_instance_cols = if num_instance_rows > 0 { instance[0].len() } else { 0 };
+            #[cfg(feature = "gpu-accelerated")]
             let num_advice_cols = if num_advice_rows > 0 { advice[0].len() } else { 0 };
 
-            let gate_data = GateData::new(
-                unsafe { icicle_fixed.as_ptr() },
-                fixed.len() as u32,
-                fixed[0].len() as u32,
-                unsafe { icicle_advice.as_ptr() },
-                num_advice_rows as u32,
-                num_advice_cols as u32,
-                unsafe { icicle_instance.as_ptr() },
-                num_instance_rows as u32,
-                num_instance_cols as u32,
-                icicle_challenges.as_ptr(),
-                challenges.len() as u32,
-                icicle_beta.as_ptr(),
-                icicle_gamma.as_ptr(),
-                icicle_theta.as_ptr(),
-                icicle_y.as_ptr(),
-            );
-
             // Custom gates
+            #[cfg(feature = "gpu-accelerated")]
             {
+                let gate_data = GateData::new(
+                    unsafe { icicle_fixed.as_ptr() },
+                    fixed.len() as u32,
+                    fixed[0].len() as u32,
+                    unsafe { icicle_advice.as_ptr() },
+                    num_advice_rows as u32,
+                    num_advice_cols as u32,
+                    unsafe { icicle_instance.as_ptr() },
+                    num_instance_rows as u32,
+                    num_instance_cols as u32,
+                    icicle_challenges.as_ptr(),
+                    challenges.len() as u32,
+                    icicle_beta.as_ptr(),
+                    icicle_gamma.as_ptr(),
+                    icicle_theta.as_ptr(),
+                    icicle_y.as_ptr(),
+                );
                 let (icicle_calculations, targets, value_types, value_indices, icicle_constants, icicle_rotations, size, num_intermediates, horner_value_types, horner_value_indices, horner_offsets, horner_sizes) = create_calculation_data::<C>(
                     &self.custom_gates.calculations,
                     &self.custom_gates.constants,
@@ -502,7 +524,7 @@ impl<C: CurveAffine> Evaluator<C> {
                     rot_scale as u32,
                     isize as u32,
                 );
-    
+
                 let horner_data = HornerData::new(
                     horner_value_types.as_ptr(),
                     horner_value_indices.as_ptr(),
@@ -510,16 +532,16 @@ impl<C: CurveAffine> Evaluator<C> {
                     horner_sizes.as_ptr(),
                     horner_value_types.len() as u32
                 );
-    
+
                 let mut d_result = DeviceVec::device_malloc_async(values.len(), &IcicleStream::default()).unwrap();
-    
+
                 let mut cfg = GateOpsConfig::default();
                 cfg.is_fixed_on_device = true;
                 cfg.is_advice_on_device = true;
                 cfg.is_instance_on_device = true;
                 cfg.is_previous_value_on_device = true;
                 cfg.is_result_on_device = true;
-                
+
                 gate_evaluation(
                     &gate_data,
                     &calculation_data,
@@ -528,11 +550,48 @@ impl<C: CurveAffine> Evaluator<C> {
                     &cfg,
                 )
                 .unwrap();
-    
-    
+
+
                 let halo2_result: Vec<C::ScalarExt> = c_scalars_from_device_vec(&mut d_result, &IcicleStream::default());
-    
+
                 values =  Polynomial::from_vec(halo2_result);
+            }
+
+            // Custom gates - CPU optimized path
+            #[cfg(not(feature = "gpu-accelerated"))]
+            {
+                let num_threads = multicore::current_num_threads();
+                let advice_ref = &advice;
+                let instance_ref = &instance;
+                multicore::scope(|scope| {
+                    let chunk_size = (size + num_threads - 1) / num_threads;
+                    for (thread_idx, values) in values.chunks_mut(chunk_size).enumerate() {
+                        let start = thread_idx * chunk_size;
+                        let advice_ref = advice_ref;
+                        let instance_ref = instance_ref;
+                        scope.spawn(move |_| {
+                            let mut eval_data = self.custom_gates.instance();
+                            for (i, value) in values.iter_mut().enumerate() {
+                                let idx = start + i;
+                                *value = self.custom_gates.evaluate(
+                                    &mut eval_data,
+                                    fixed,
+                                    advice_ref,
+                                    instance_ref,
+                                    challenges,
+                                    &beta,
+                                    &gamma,
+                                    &theta,
+                                    &y,
+                                    value,
+                                    idx,
+                                    rot_scale,
+                                    isize,
+                                );
+                            }
+                        });
+                    }
+                });
             }
 
             // Permutations
@@ -619,8 +678,8 @@ impl<C: CurveAffine> Evaluator<C> {
                 }
             }
 
-            // Merged Lookups section
-            #[cfg(feature = "mv-lookup")]
+            // Merged Lookups section - GPU accelerated
+            #[cfg(all(feature = "mv-lookup", feature = "gpu-accelerated"))]
             {
                 let y_vec = [y];
                 let icicle_y = device_vec_from_c_scalars(&y_vec, &IcicleStream::default());
@@ -717,7 +776,7 @@ impl<C: CurveAffine> Evaluator<C> {
                                             rot_scale as u32,
                                             isize as u32,
                                         );
-                                        
+
                                         let horner_data = HornerData::new(
                                             horner_value_types.as_ptr(),
                                             horner_value_indices.as_ptr(),
@@ -725,7 +784,7 @@ impl<C: CurveAffine> Evaluator<C> {
                                             horner_sizes.as_ptr(),
                                             horner_value_types.len() as u32,
                                         );
-                                        
+
                                         let mut cfg = GateOpsConfig::default();
                                         cfg.is_async = true;
                                         cfg.stream_handle = (&stream).into();
@@ -970,6 +1029,166 @@ impl<C: CurveAffine> Evaluator<C> {
                 values = Polynomial::from_vec(result);
             }
 
+            // CPU-optimized lookups section - batch processing for better performance
+            #[cfg(all(feature = "mv-lookup", not(feature = "gpu-accelerated")))]
+            {
+                // For lookups, compute inputs_inv_sum = ∑ 1 / (f_i(X) + α)
+                // CPU-friendly: batch process all lookups together using batch_invert()
+                let inputs_inv_sum_cosets: Vec<_> = lookups
+                    .par_iter()
+                    .enumerate()
+                    .map(|(n, lookup)| {
+                        let (inputs_lookup_evaluator, _) = &self.lookups[n];
+                        let mut inputs_eval_data: Vec<_> = inputs_lookup_evaluator
+                            .iter()
+                            .map(|input_lookup_evaluator| input_lookup_evaluator.instance())
+                            .collect();
+
+                        let mut inputs_values_for_extended_domain: Vec<C::Scalar> =
+                            Vec::with_capacity(self.lookups[n].0.len() * domain.extended_len());
+                        for idx in 0..domain.extended_len() {
+                            // For each compressed input column, evaluate at ω^i and add beta
+                            // This is a vector of length self.lookups[n].0.len()
+                            let inputs_values: Vec<C::ScalarExt> = inputs_lookup_evaluator
+                                .par_iter()
+                                .zip(inputs_eval_data.par_iter_mut())
+                                .map(|(input_lookup_evaluator, input_eval_data)| {
+                                    input_lookup_evaluator.evaluate(
+                                        input_eval_data,
+                                        fixed,
+                                        &advice[..],
+                                        &instance[..],
+                                        challenges,
+                                        &beta,
+                                        &gamma,
+                                        &theta,
+                                        &y,
+                                        &C::ScalarExt::ZERO,
+                                        idx,
+                                        rot_scale,
+                                        isize,
+                                    )
+                                })
+                                .collect();
+
+                            inputs_values_for_extended_domain.extend_from_slice(&inputs_values);
+                        }
+
+                        // Critical CPU optimization: batch invert all values at once
+                        inputs_values_for_extended_domain.batch_invert();
+
+                        // The outer vector has capacity domain.extended_len()
+                        // The inner vector has capacity self.lookups[n].0.len()
+                        let inputs_inv_sums: Vec<Vec<_>> = inputs_values_for_extended_domain
+                            .chunks_exact(self.lookups[n].0.len())
+                            .map(|c| c.to_vec())
+                            .collect();
+
+                        (
+                            inputs_inv_sums,
+                            domain.coeff_to_extended(&lookup.phi_poly, &IcicleStream::default()),
+                            domain.coeff_to_extended(&lookup.m_poly, &IcicleStream::default()),
+                        )
+                    })
+                    .collect();
+
+                // CPU-friendly lookup constraint processing
+                parallelize(&mut values, |values, start| {
+                    for (n, _lookup) in lookups.iter().enumerate() {
+                        let (inputs_inv_sum, phi_coset, m_coset) = &inputs_inv_sum_cosets[n];
+
+                        let (inputs_lookup_evaluator, table_lookup_evaluator) = &self.lookups[n];
+                        let mut inputs_eval_data: Vec<_> = inputs_lookup_evaluator
+                            .iter()
+                            .map(|input_lookup_evaluator| input_lookup_evaluator.instance())
+                            .collect();
+
+                        let mut table_eval_data = table_lookup_evaluator.instance();
+
+                        for (i, value) in values.iter_mut().enumerate() {
+                            let idx = start + i;
+
+                            // f_i(X) + α for i in expressions
+                            let inputs_value: Vec<C::ScalarExt> = inputs_lookup_evaluator
+                                .iter()
+                                .zip(inputs_eval_data.iter_mut())
+                                .map(|(input_lookup_evaluator, input_eval_data)| {
+                                    input_lookup_evaluator.evaluate(
+                                        input_eval_data,
+                                        fixed,
+                                        &advice[..],
+                                        &instance[..],
+                                        challenges,
+                                        &beta,
+                                        &gamma,
+                                        &theta,
+                                        &y,
+                                        &C::ScalarExt::ZERO,
+                                        idx,
+                                        rot_scale,
+                                        isize,
+                                    )
+                                })
+                                .collect();
+
+                            // Π(φ_i(X))
+                            let inputs_prod: C::Scalar = inputs_value
+                                .iter()
+                                .fold(C::Scalar::ONE, |acc, input| acc * input);
+
+                            // f_i(X) + α at ω^idx
+                            let fi_inverses = &inputs_inv_sum[idx];
+                            let inputs_inv_sum = fi_inverses
+                                .iter()
+                                .fold(C::Scalar::ZERO, |acc, input| acc + input);
+
+                            // t(X) + α
+                            let table_value = table_lookup_evaluator.evaluate(
+                                &mut table_eval_data,
+                                fixed,
+                                &advice[..],
+                                &instance[..],
+                                challenges,
+                                &beta,
+                                &gamma,
+                                &theta,
+                                &y,
+                                &C::ScalarExt::ZERO,
+                                idx,
+                                rot_scale,
+                                isize,
+                            );
+
+                            let r_next = get_rotation_idx(idx, 1, rot_scale, isize);
+
+                            let lhs = {
+                                // τ(X) * Π(φ_i(X)) * (ϕ(gX) - ϕ(X))
+                                table_value * inputs_prod * (phi_coset[r_next] - phi_coset[idx])
+                            };
+
+                            let rhs = {
+                                //   τ(X) * Π(φ_i(X)) * (∑ 1/(φ_i(X)) - m(X) / τ(X))))
+                                // = (τ(X) * Π(φ_i(X)) * ∑ 1/(φ_i(X))) - Π(φ_i(X)) * m(X)
+                                // = Π(φ_i(X)) * (τ(X) * ∑ 1/(φ_i(X)) - m(X))
+                                inputs_prod * (table_value * inputs_inv_sum - m_coset[idx])
+                            };
+
+                            // phi[0] = 0
+                            *value = *value * y + l0[idx] * phi_coset[idx];
+
+                            // phi[u] = 0
+                            *value = *value * y + l_last[idx] * phi_coset[idx];
+
+                            // q(X) = LHS - RHS mod zH(X)
+                            *value = *value * y + (lhs - rhs) * l_active_row[idx];
+                        }
+                    }
+                });
+
+                // Clean up memory
+                drop(inputs_inv_sum_cosets);
+            }
+
             #[cfg(all(not(feature = "mv-lookup"), feature = "precompute-coset"))]
             let mut cosets: Vec<_> = {
                 let domain = &pk.vk.domain;
@@ -992,41 +1211,41 @@ impl<C: CurveAffine> Evaluator<C> {
                     // Polynomials required for this lookup.
                     // Calculated here so these only have to be kept in memory for the short time
                     // they are actually needed.
-    
+
                     #[cfg(feature = "precompute-coset")]
                     let (product_coset, permuted_input_coset, permuted_table_coset) = &cosets.remove(0);
-    
+
                     #[cfg(not(feature = "precompute-coset"))]
                     let (product_coset, permuted_input_coset, permuted_table_coset) = {
                         let mut stream_coset = IcicleStream::create().unwrap();
                         let mut stream_input_coset = IcicleStream::create().unwrap();
                         let mut stream_table_coset = IcicleStream::create().unwrap();
-    
+
                         let product_coset = pk.vk.domain.coeff_to_extended(&lookup.product_poly, &stream_coset);
                         let permuted_input_coset =
                             pk.vk.domain.coeff_to_extended(&lookup.permuted_input_poly, &stream_input_coset);
                         let permuted_table_coset =
                             pk.vk.domain.coeff_to_extended(&lookup.permuted_table_poly, &stream_table_coset);
-    
+
                         stream_coset.synchronize().unwrap();
                         stream_input_coset.synchronize().unwrap();
                         stream_table_coset.synchronize().unwrap();
-    
+
                         stream_coset.destroy().unwrap();
                         stream_input_coset.destroy().unwrap();
                         stream_table_coset.destroy().unwrap();
-    
+
                         (product_coset, permuted_input_coset, permuted_table_coset)
-    
+
                     };
-    
+
                     // Lookup constraints
                     parallelize(&mut values, |values, start| {
                         let lookup_evaluator = &self.lookups[n];
                         let mut eval_data = lookup_evaluator.instance();
                         for (i, value) in values.iter_mut().enumerate() {
                             let idx = start + i;
-    
+
                             let table_value = lookup_evaluator.evaluate(
                                 &mut eval_data,
                                 fixed,
@@ -1042,10 +1261,10 @@ impl<C: CurveAffine> Evaluator<C> {
                                 rot_scale,
                                 isize,
                             );
-    
+
                             let r_next = get_rotation_idx(idx, 1, rot_scale, isize);
                             let r_prev = get_rotation_idx(idx, -1, rot_scale, isize);
-    
+
                             let a_minus_s = permuted_input_coset[idx] - permuted_table_coset[idx];
                             // l_0(X) * (1 - z(X)) = 0
                             *value = *value * y + ((one - product_coset[idx]) * l0[idx]);
