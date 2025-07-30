@@ -1,6 +1,6 @@
-## Icicle Halo2 Usage Guide
+## halo2
+This is ezkl's fork of privacy-scaling-explorations/halo2, including GPU contributions from Ingonyama [described here](https://github.com/ingonyama-zk/halo2) which enable efficient proof generation using CUDA.  
 
-This repository contains a ICICLE integration fork of [ezkl-halo2](https://github.com/zkonduit/halo2), designed for efficient proof generation using CUDA.
 
 ### Prerequisites
 
@@ -14,15 +14,16 @@ This repository contains a ICICLE integration fork of [ezkl-halo2](https://githu
 
 ## Benchmarks
 
-We benched the code on this setup:
+The new CUDA backend was benchmarked by Ingonyama on this setup:
 - 4080 & i9–13900K
 
-We used the circuits in the MoPro’s benchmark repository to compare the proving systems.
+They used the circuits in the MoPro’s benchmark repository to compare the proving systems.
 
 - **Simple Lookup**: Defines a lookup table that doubles input values and verifies this relation using both a lookup constraint and a simple identity gate. 
 - **Plonk**: Implements a gate that supports both multiplication and addition. It repeatedly computes a^2 + a, verifies correctness using gate constraints.
 - **Lookups**:  Defines a lookup-heavy computation using a simple 8-bit lookup table and multiple redundant lookup constraints to inflate the degree of the constraint system.
 
+As compared to the earlier version of this repository, the benchmarks were as follows. 
 <p align="center">
   <img src="./figures/lookups_ms_log_scale.png" alt="4090 Benchmark" width="45%">
   <img src="./figures/lookups.png" alt="4080 Benchmark" width="45%">
@@ -38,9 +39,7 @@ We used the circuits in the MoPro’s benchmark repository to compare the provin
   <img src="./figures/plonk.png" alt="4080 Benchmark" width="45%">
 </p>
 
-## Reproducing the benchmarks
-
-We have used the existing benchmark circuits under the halo2 repository. You can reporduce the benchmarks by running 
+You can reproduce the benchmarks by running 
 
 ```bash
 cargo run --package halo2_proofs --example lookups
