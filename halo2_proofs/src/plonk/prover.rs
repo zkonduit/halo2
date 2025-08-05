@@ -239,8 +239,10 @@ where
             A: FnOnce() -> AR,
             AR: Into<String>,
         {
-            // Ignore assignment of advice column in different phase than current one.
-            if self.current_phase != column.column_type().phase {
+            // Okay: Assigning Phase 1 value to Phase 2 column
+            // Not okay: Assigning Phase 2 value to Phase 1 column
+            // TODO : Should ensure that assigning phase 2 value to phase 1 column is prohibited
+            if self.current_phase < column.column_type().phase {
                 return Ok(());
             }
 
