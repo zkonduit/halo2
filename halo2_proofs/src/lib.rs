@@ -48,4 +48,5 @@ pub use helpers::SerdeFormat;
 pub use helpers::SerdePrimeField;
 
 #[allow(unsafe_code)]
+#[cfg(feature = "gpu-accelerated")]
 pub mod icicle;

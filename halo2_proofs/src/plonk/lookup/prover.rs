@@ -4,6 +4,7 @@ use super::super::{
 };
 use super::Argument;
 use crate::helpers::SerdeCurveAffine;
+#[cfg(feature = "gpu-accelerated")]
 use crate::icicle::icicle_invert;
 use crate::plonk::evaluation::evaluate;
 use crate::SerdeFormat;
@@ -234,6 +235,7 @@ impl<C: CurveAffine> Permuted<C> {
         mut rng: R,
         transcript: &mut T,
     ) -> Result<Committed<C>, Error> {
+        #[cfg(feature = "gpu-accelerated")]
         let mut stream = IcicleStream::create().unwrap();
         let blinding_factors = pk.vk.cs.blinding_factors();
         // Goal is to compute the products of fractions
@@ -261,7 +263,15 @@ impl<C: CurveAffine> Permuted<C> {
 
         // Batch invert to obtain the denominators for the lookup product
         // polynomials
-        lookup_product = icicle_invert(&lookup_product, &stream);
+        #[cfg(feature = "gpu-accelerated")]
+        {
+            lookup_product = icicle_invert(&lookup_product, &stream);
+        }
+        #[cfg(not(feature = "gpu-accelerated"))]
+        {
+            use ff::BatchInvert;
+            lookup_product.batch_invert();
+        }
 
         // Finish the computation of the entire fraction by computing the numerators
         // (\theta^{m-1} a_0(\omega^i) + \theta^{m-2} a_1(\omega^i) + ... + \theta a_{m-2}(\omega^i) + a_{m-1}(\omega^i) + \beta)
@@ -344,11 +354,32 @@ impl<C: CurveAffine> Permuted<C> {
         }
 
         let product_blind = Blind(C::Scalar::random(rng));
-        let product_commitment = params.commit_lagrange_with_stream(&z, product_blind, &stream).to_affine();
-        let z = pk.vk.domain.lagrange_to_coeff_stream(z, &stream);
+        let product_commitment = {
+            #[cfg(feature = "gpu-accelerated")]
+            {
+                params.commit_lagrange_with_stream(&z, product_blind, &stream).to_affine()
+            }
+            #[cfg(not(feature = "gpu-accelerated"))]
+            {
+                params.commit_lagrange(&z, product_blind).to_affine()
+            }
+        };
+        let z = {
+            #[cfg(feature = "gpu-accelerated")]
+            {
+                pk.vk.domain.lagrange_to_coeff_stream(z, &stream)
+            }
+            #[cfg(not(feature = "gpu-accelerated"))]
+            {
+                pk.vk.domain.lagrange_to_coeff(z)
+            }
+        };
 
-        stream.synchronize().unwrap();
-        stream.destroy().unwrap();
+        #[cfg(feature = "gpu-accelerated")]
+        {
+            stream.synchronize().unwrap();
+            stream.destroy().unwrap();
+        }
         
         // Hash product commitment
         transcript.write_point(product_commitment)?;

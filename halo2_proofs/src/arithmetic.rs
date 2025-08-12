@@ -1,6 +1,7 @@
 //! This module provides common utilities, traits and structures for group,
 //! field and polynomial arithmetic.
 
+#[cfg(feature = "gpu-accelerated")]
 use super::icicle;
 use super::multicore;
 pub use ff::Field;
@@ -9,8 +10,11 @@ use group::{
     prime::PrimeCurveAffine,
     Curve, GroupOpsOwned, ScalarMulOwned,
 };
+#[cfg(feature = "gpu-accelerated")]
 use icicle_bn254::curve::CurveCfg;
+#[cfg(feature = "gpu-accelerated")]
 use icicle_core::curve::Affine;
+#[cfg(feature = "gpu-accelerated")]
 use icicle_runtime::memory::DeviceSlice;
 
 use halo2curves::msm::msm_best;
@@ -49,6 +53,7 @@ pub fn best_multiexp_cpu<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C
 }
 
 /// Performs a multi-exponentiation operation on GPU using Icicle library
+#[cfg(feature = "gpu-accelerated")]
 pub fn best_multiexp_gpu<C: CurveAffine>(coeffs: &[C::Scalar], g: &DeviceSlice<Affine<CurveCfg>>, stream: &IcicleStream) -> C::Curve {
     icicle::multiexp_on_device::<C>(coeffs, g, stream)
 }
@@ -61,12 +66,14 @@ pub fn best_fft<Scalar: Field + ff::PrimeField, G: FftGroup<Scalar> + ff::PrimeF
     data: &FFTData<Scalar>,
     inverse: bool,
 ) {
+#[cfg(feature = "gpu-accelerated")]
     if !icicle::should_use_cpu_fft(scalars.len()) && icicle::is_gpu_supported_field(&omega)
     {
         icicle::fft_on_device::<Scalar, G>(scalars, inverse, &IcicleStream::default());
-    } else {
-        fft::fft(scalars, omega, log_n, data, inverse);
+        return;
     }
+    
+    fft::fft(scalars, omega, log_n, data, inverse);
 }
 
 /// Convert coefficient bases group elements to lagrange basis by inverse FFT.
@@ -322,6 +329,7 @@ pub fn bitreverse(mut n: usize, l: usize) -> usize {
     r
 }
 
+#[cfg(feature = "gpu-accelerated")]
 use icicle_runtime::stream::IcicleStream;
 #[cfg(test)]
 use rand_core::OsRng;

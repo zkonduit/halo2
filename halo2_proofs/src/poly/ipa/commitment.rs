@@ -16,6 +16,7 @@ mod verifier;
 
 pub use prover::create_proof;
 pub use verifier::verify_proof;
+#[cfg(feature = "gpu-accelerated")]
 use icicle_runtime::stream::IcicleStream;
 
 use std::io;
@@ -102,6 +103,7 @@ impl<'params, C: CurveAffine> Params<'params, C> for ParamsIPA<C> {
         best_multiexp::<C>(&tmp_scalars, &tmp_bases)
     }
 
+    #[cfg(feature = "gpu-accelerated")]
     fn commit_lagrange_with_stream(
         &self,
         poly: &Polynomial<C::Scalar, LagrangeCoeff>,

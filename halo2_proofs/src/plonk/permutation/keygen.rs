@@ -1,5 +1,6 @@
 use ff::{Field, PrimeField};
 use group::Curve;
+#[cfg(feature = "gpu-accelerated")]
 use icicle_runtime::stream::IcicleStream;
 
 use super::{Argument, ProvingKey, VerifyingKey};
@@ -385,7 +386,16 @@ pub(crate) fn build_pk<'params, C: CurveAffine, P: Params<'params, C>>(
             for (x, coset) in o.iter_mut().enumerate() {
                 let i = start + x;
                 let poly = polys[i].clone();
-                *coset = domain.coeff_to_extended(&poly, &IcicleStream::default());
+                *coset = {
+                    #[cfg(feature = "gpu-accelerated")]
+                    {
+                        domain.coeff_to_extended(&poly, &IcicleStream::default())
+                    }
+                    #[cfg(not(feature = "gpu-accelerated"))]
+                    {
+                        domain.coeff_to_extended(&poly)
+                    }
+                };
             }
         });
     }

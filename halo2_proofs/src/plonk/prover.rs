@@ -1,6 +1,7 @@
 use ff::{Field, FromUniformBytes, WithSmallOrderMulGroup};
 use group::Curve;
 use instant::Instant;
+use maybe_rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use rand_core::RngCore;
 use rustc_hash::FxBuildHasher;
 use rustc_hash::FxHashMap as HashMap;
@@ -19,7 +20,7 @@ use super::{
     ChallengeY, Error, ProvingKey,
 };
 #[cfg(feature = "mv-lookup")]
-use maybe_rayon::iter::{IndexedParallelIterator, ParallelIterator};
+use maybe_rayon::iter::IndexedParallelIterator;
 
 #[cfg(not(feature = "mv-lookup"))]
 use super::lookup;
@@ -27,7 +28,7 @@ use super::lookup;
 use super::mv_lookup as lookup;
 
 #[cfg(feature = "mv-lookup")]
-use maybe_rayon::iter::{IntoParallelIterator, IntoParallelRefIterator};
+use maybe_rayon::iter::IntoParallelIterator;
 
 use crate::{
     arithmetic::{eval_polynomial, CurveAffine},

@@ -25,6 +25,7 @@ use icicle_core::{
     gate_ops::{GateData, LookupConfig, CalculationData, HornerData, GateOpsConfig, LookupData, gate_evaluation, lookups_constraint},
     vec_ops::{accumulate_scalars, VecOpsConfig}
 };
+#[cfg(feature = "gpu-accelerated")]
 use icicle_runtime::stream::IcicleStream;
 #[cfg(feature = "gpu-accelerated")]
 use icicle_runtime::memory::{DeviceVec, HostOrDeviceSlice, HostSlice};
@@ -431,12 +432,18 @@ impl<C: CurveAffine> Evaluator<C> {
                     let instance: Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>> = instance
                         .par_iter()
                         .map(|poly| {
-                            let mut stream = IcicleStream::create().unwrap();
-                            let result = domain.coeff_to_extended(poly, &stream);
-                            stream.synchronize().unwrap();
-                            stream.destroy().unwrap();
-
-                            result
+                            #[cfg(feature = "gpu-accelerated")]
+                            {
+                                let mut stream = IcicleStream::create().unwrap();
+                                let result = domain.coeff_to_extended(poly, &stream);
+                                stream.synchronize().unwrap();
+                                stream.destroy().unwrap();
+                                result
+                            }
+                            #[cfg(not(feature = "gpu-accelerated"))]
+                            {
+                                domain.coeff_to_extended(poly)
+                            }
                         })
                         .collect();
 
@@ -446,12 +453,18 @@ impl<C: CurveAffine> Evaluator<C> {
                     let advice: Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>> = advice
                         .par_iter()
                         .map(|poly| {
-                            let mut stream = IcicleStream::create().unwrap();
-                            let result = domain.coeff_to_extended(poly, &stream);
-                            stream.synchronize().unwrap();
-                            stream.destroy().unwrap();
-
-                            result
+                            #[cfg(feature = "gpu-accelerated")]
+                            {
+                                let mut stream = IcicleStream::create().unwrap();
+                                let result = domain.coeff_to_extended(poly, &stream);
+                                stream.synchronize().unwrap();
+                                stream.destroy().unwrap();
+                                result
+                            }
+                            #[cfg(not(feature = "gpu-accelerated"))]
+                            {
+                                domain.coeff_to_extended(poly)
+                            }
                         })
                         .collect();
 
@@ -1086,8 +1099,14 @@ impl<C: CurveAffine> Evaluator<C> {
 
                         (
                             inputs_inv_sums,
+                            #[cfg(feature = "gpu-accelerated")]
                             domain.coeff_to_extended(&lookup.phi_poly, &IcicleStream::default()),
+                            #[cfg(not(feature = "gpu-accelerated"))]
+                            domain.coeff_to_extended(&lookup.phi_poly),
+                            #[cfg(feature = "gpu-accelerated")]
                             domain.coeff_to_extended(&lookup.m_poly, &IcicleStream::default()),
+                            #[cfg(not(feature = "gpu-accelerated"))]
+                            domain.coeff_to_extended(&lookup.m_poly),
                         )
                     })
                     .collect();
@@ -1217,23 +1236,54 @@ impl<C: CurveAffine> Evaluator<C> {
 
                     #[cfg(not(feature = "precompute-coset"))]
                     let (product_coset, permuted_input_coset, permuted_table_coset) = {
+                        #[cfg(feature = "gpu-accelerated")]
                         let mut stream_coset = IcicleStream::create().unwrap();
+                        #[cfg(feature = "gpu-accelerated")]
                         let mut stream_input_coset = IcicleStream::create().unwrap();
+                        #[cfg(feature = "gpu-accelerated")]
                         let mut stream_table_coset = IcicleStream::create().unwrap();
 
-                        let product_coset = pk.vk.domain.coeff_to_extended(&lookup.product_poly, &stream_coset);
-                        let permuted_input_coset =
-                            pk.vk.domain.coeff_to_extended(&lookup.permuted_input_poly, &stream_input_coset);
-                        let permuted_table_coset =
-                            pk.vk.domain.coeff_to_extended(&lookup.permuted_table_poly, &stream_table_coset);
+                        let product_coset = {
+                            #[cfg(feature = "gpu-accelerated")]
+                            {
+                                pk.vk.domain.coeff_to_extended(&lookup.product_poly, &stream_coset)
+                            }
+                            #[cfg(not(feature = "gpu-accelerated"))]
+                            {
+                                pk.vk.domain.coeff_to_extended(&lookup.product_poly)
+                            }
+                        };
+                        let permuted_input_coset = {
+                            #[cfg(feature = "gpu-accelerated")]
+                            {
+                                pk.vk.domain.coeff_to_extended(&lookup.permuted_input_poly, &stream_input_coset)
+                            }
+                            #[cfg(not(feature = "gpu-accelerated"))]
+                            {
+                                pk.vk.domain.coeff_to_extended(&lookup.permuted_input_poly)
+                            }
+                        };
+                        let permuted_table_coset = {
+                            #[cfg(feature = "gpu-accelerated")]
+                            {
+                                pk.vk.domain.coeff_to_extended(&lookup.permuted_table_poly, &stream_table_coset)
+                            }
+                            #[cfg(not(feature = "gpu-accelerated"))]
+                            {
+                                pk.vk.domain.coeff_to_extended(&lookup.permuted_table_poly)
+                            }
+                        };
 
-                        stream_coset.synchronize().unwrap();
-                        stream_input_coset.synchronize().unwrap();
-                        stream_table_coset.synchronize().unwrap();
+                        #[cfg(feature = "gpu-accelerated")]
+                        {
+                            stream_coset.synchronize().unwrap();
+                            stream_input_coset.synchronize().unwrap();
+                            stream_table_coset.synchronize().unwrap();
 
-                        stream_coset.destroy().unwrap();
-                        stream_input_coset.destroy().unwrap();
-                        stream_table_coset.destroy().unwrap();
+                            stream_coset.destroy().unwrap();
+                            stream_input_coset.destroy().unwrap();
+                            stream_table_coset.destroy().unwrap();
+                        }
 
                         (product_coset, permuted_input_coset, permuted_table_coset)
 
@@ -1303,7 +1353,16 @@ impl<C: CurveAffine> Evaluator<C> {
             // Shuffle constraints
             {
                 for (n, shuffle) in shuffles.iter().enumerate() {
-                    let product_coset = pk.vk.domain.coeff_to_extended(&shuffle.product_poly, &IcicleStream::default());
+                    let product_coset = {
+                        #[cfg(feature = "gpu-accelerated")]
+                        {
+                            pk.vk.domain.coeff_to_extended(&shuffle.product_poly, &IcicleStream::default())
+                        }
+                        #[cfg(not(feature = "gpu-accelerated"))]
+                        {
+                            pk.vk.domain.coeff_to_extended(&shuffle.product_poly)
+                        }
+                    };
 
                     // Shuffle constraints
                     parallelize(&mut values, |values, start| {

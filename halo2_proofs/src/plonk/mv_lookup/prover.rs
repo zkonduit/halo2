@@ -12,13 +12,16 @@ use crate::{
         Coeff, EvaluationDomain, LagrangeCoeff, Polynomial, ProverQuery, Rotation,
     },
     transcript::{EncodedChallenge, TranscriptWrite},
-    icicle::{c_scalars_from_device_vec, device_vec_from_c_scalars, icicle_scalars_from_c_scalars, inplace_add, inplace_invert, inplace_mul, inplace_scalar_add, inplace_sub},
+    
 };
+#[cfg(feature = "gpu-accelerated")]
+use crate::icicle::{c_scalars_from_device_vec, device_vec_from_c_scalars, icicle_scalars_from_c_scalars, inplace_add, inplace_invert, inplace_mul, inplace_scalar_add, inplace_sub};
 use ff::WithSmallOrderMulGroup;
 use group::{
     ff::Field,
     Curve,
 };
+#[cfg(feature = "gpu-accelerated")]
 use icicle_runtime::{
     memory::{DeviceVec, HostSlice},
     stream::IcicleStream,

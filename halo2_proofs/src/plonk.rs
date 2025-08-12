@@ -7,7 +7,9 @@
 
 use blake2b_simd::Params as Blake2bParams;
 use group::ff::{Field, FromUniformBytes, PrimeField};
+#[cfg(feature = "gpu-accelerated")]
 use icicle_bn254::curve::ScalarField;
+#[cfg(feature = "gpu-accelerated")]
 use icicle_runtime::{memory::DeviceVec, stream::IcicleStream};
 
 use crate::arithmetic::CurveAffine;
@@ -15,6 +17,7 @@ use crate::helpers::{
     polynomial_slice_byte_length, read_polynomial_vec, write_polynomial_slice, SerdeCurveAffine,
     SerdePrimeField,
 };
+#[cfg(feature = "gpu-accelerated")]
 use crate::icicle::{device_vec_from_c_scalars, device_vec_from_poly_vec};
 use crate::poly::{
     Coeff, EvaluationDomain, ExtendedLagrangeCoeff, LagrangeCoeff, PinnedEvaluationDomain,
@@ -48,7 +51,9 @@ pub use verifier::*;
 
 pub use evaluation::{CalculationInfo, ValueSource, Calculation};
 use evaluation::Evaluator;
-use std::{fmt, io, sync::Arc};
+use std::{fmt, io};
+#[cfg(feature = "gpu-accelerated")]
+use std::sync::Arc;
 
 /// This is a verifying key which allows for the verification of proofs for a
 /// particular circuit.
@@ -348,9 +353,13 @@ pub struct ProvingKey<C: CurveAffine> {
     l_active_row: Polynomial<C::Scalar, ExtendedLagrangeCoeff>,
     fixed_values: Vec<Polynomial<C::Scalar, LagrangeCoeff>>,
     fixed_polys: Vec<Polynomial<C::Scalar, Coeff>>,
+    #[cfg(feature = "gpu-accelerated")]
     icicle_fixed: Arc<DeviceVec<ScalarField>>,
+    #[cfg(feature = "gpu-accelerated")]
     icicle_l0: Arc<DeviceVec<ScalarField>>,
+    #[cfg(feature = "gpu-accelerated")]
     icicle_l_last: Arc<DeviceVec<ScalarField>>,
+    #[cfg(feature = "gpu-accelerated")]
     icicle_l_active_row: Arc<DeviceVec<ScalarField>>,
     fixed_cosets: Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>>,
     permutation: permutation::ProvingKey<C>,
@@ -454,9 +463,13 @@ where
         let fixed_polys = read_polynomial_vec(reader, format)?;
         let fixed_cosets = read_polynomial_vec(reader, format)?;
 
+        #[cfg(feature = "gpu-accelerated")]
         let icicle_fixed = device_vec_from_poly_vec::<C, ExtendedLagrangeCoeff>(&fixed_cosets, &IcicleStream::default());
+        #[cfg(feature = "gpu-accelerated")]
         let icicle_l0 = device_vec_from_c_scalars(&l0.as_ref(), &IcicleStream::default());
+        #[cfg(feature = "gpu-accelerated")]
         let icicle_l_last = device_vec_from_c_scalars(&l_last.as_ref(), &IcicleStream::default());
+        #[cfg(feature = "gpu-accelerated")]
         let icicle_l_active_row = device_vec_from_c_scalars(&l_active_row.as_ref(), &IcicleStream::default());
 
         let permutation = permutation::ProvingKey::read(reader, format)?;
@@ -469,9 +482,13 @@ where
             fixed_values,
             fixed_polys,
             fixed_cosets,
+            #[cfg(feature = "gpu-accelerated")]
             icicle_fixed: Arc::new(icicle_fixed),
+            #[cfg(feature = "gpu-accelerated")]
             icicle_l0: Arc::new(icicle_l0),
+            #[cfg(feature = "gpu-accelerated")]
             icicle_l_last: Arc::new(icicle_l_last),
+            #[cfg(feature = "gpu-accelerated")]
             icicle_l_active_row: Arc::new(icicle_l_active_row),
             permutation,
             ev,

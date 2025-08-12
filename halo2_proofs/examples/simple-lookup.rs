@@ -8,8 +8,11 @@ use halo2_proofs::poly::kzg::multiopen::VerifierGWC;
 use halo2_proofs::poly::{commitment::ParamsProver, Rotation};
 use halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255};
 use halo2curves::bn256::{Bn256, Fr, G1Affine};
+#[cfg(feature = "gpu-accelerated")]
 use icicle_bn254::curve::ScalarField;
+#[cfg(feature = "gpu-accelerated")]
 use icicle_core::ntt::release_domain;
+#[cfg(feature = "gpu-accelerated")]
 use icicle_runtime::{stream::IcicleStream, warmup};
 use rand_core::OsRng;
 

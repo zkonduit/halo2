@@ -7,7 +7,9 @@ use halo2_proofs::poly::commitment::Params;
 use halo2_proofs::poly::{commitment::ParamsProver, Rotation};
 use halo2_proofs::transcript::{Blake2bRead, Blake2bWrite, Challenge255};
 use halo2curves::bn256::{Bn256, Fr, G1Affine};
+#[cfg(feature = "gpu-accelerated")]
 use icicle_bn254::curve::ScalarField;
+#[cfg(feature = "gpu-accelerated")]
 use icicle_core::ntt::release_domain;
 
 use halo2_proofs::{
@@ -17,8 +19,10 @@ use halo2_proofs::{
         strategy::SingleStrategy,
     },
     transcript::{TranscriptReadBuffer, TranscriptWriterBuffer},
-    icicle::try_load_and_set_backend_device
 };
+#[cfg(feature = "gpu-accelerated")]
+use halo2_proofs::icicle::try_load_and_set_backend_device;
+#[cfg(feature = "gpu-accelerated")]
 use icicle_runtime::{stream::IcicleStream, warmup};
 
 use std::marker::PhantomData;
