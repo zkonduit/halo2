@@ -6,7 +6,7 @@ use crate::helpers::SerdeCurveAffine;
 use crate::plonk::evaluation::evaluate;
 use crate::SerdeFormat;
 use crate::{
-    arithmetic::{eval_polynomial, CurveAffine},
+    arithmetic::{eval_polynomial, parallelize, CurveAffine},
     poly::{
         commitment::{Blind, Params},
         Coeff, EvaluationDomain, LagrangeCoeff, Polynomial, ProverQuery, Rotation,
@@ -18,7 +18,7 @@ use crate::{
 use crate::icicle::{c_scalars_from_device_vec, device_vec_from_c_scalars, icicle_scalars_from_c_scalars, inplace_add, inplace_invert, inplace_mul, inplace_scalar_add, inplace_sub};
 use ff::WithSmallOrderMulGroup;
 use group::{
-    ff::Field,
+    ff::{BatchInvert, Field},
     Curve,
 };
 #[cfg(feature = "gpu-accelerated")]
@@ -257,37 +257,106 @@ impl<C: CurveAffine> Prepared<C> {
             RHS = τ(X) * Π(φ_i(X)) * (∑ 1/(φ_i(X)) - m(X) / τ(X))))
         */
 
-        let start = instant::Instant::now();
+        #[cfg(feature = "gpu-accelerated")]
         let mut stream = IcicleStream::create().unwrap();
-        let icicle_beta = device_vec_from_c_scalars(&[*beta], &stream);
 
-        // ∑ 1/(φ_i(X))
-        let inputs_log_derivatives = vec![C::Scalar::ZERO; params.n() as usize];
-        let mut d_inputs_log_derivatives = device_vec_from_c_scalars(&inputs_log_derivatives, &stream);
-        let mut d_temp = DeviceVec::device_malloc(params.n() as usize).unwrap();
-        let mut d_m_values = device_vec_from_c_scalars(&self.m_values, &stream);
-        let mut d_compressed_table_expression = device_vec_from_c_scalars(&self.compressed_table_expression, &stream);
+        let start = instant::Instant::now();
         
-        for compressed_input_expression in self.compressed_inputs_expressions.iter() {
-            let icicle_compressed_input_expression = icicle_scalars_from_c_scalars(compressed_input_expression);
-            let h_icicle_compressed_input_expression = HostSlice::from_slice(&icicle_compressed_input_expression);
-            d_temp.copy_from_host_async(h_icicle_compressed_input_expression, &stream).unwrap();
+        let log_derivatives_diff: Vec<C::Scalar> = {
+            #[cfg(feature = "gpu-accelerated")]
+            {
+                let icicle_beta = device_vec_from_c_scalars(&[*beta], &stream);
 
-            inplace_scalar_add(&mut d_temp, &icicle_beta, &stream);
-            inplace_invert(&mut d_temp, &stream);
-            inplace_add(&mut d_inputs_log_derivatives, &d_temp, &stream);
-        }
-        
-        inplace_scalar_add(&mut d_compressed_table_expression, &icicle_beta, &stream);
-        inplace_invert(&mut d_compressed_table_expression, &stream);
+                // ∑ 1/(φ_i(X))
+                let inputs_log_derivatives = vec![C::Scalar::ZERO; params.n() as usize];
+                let mut d_inputs_log_derivatives = device_vec_from_c_scalars(&inputs_log_derivatives, &stream);
+                let mut d_temp = DeviceVec::device_malloc(params.n() as usize).unwrap();
+                let mut d_m_values = device_vec_from_c_scalars(&self.m_values, &stream);
+                let mut d_compressed_table_expression = device_vec_from_c_scalars(&self.compressed_table_expression, &stream);
                 
-        inplace_mul(&mut d_m_values, &d_compressed_table_expression, &stream);
-        inplace_sub(&mut d_inputs_log_derivatives, &d_m_values, &stream);
+                for compressed_input_expression in self.compressed_inputs_expressions.iter() {
+                    let icicle_compressed_input_expression = icicle_scalars_from_c_scalars(compressed_input_expression);
+                    let h_icicle_compressed_input_expression = HostSlice::from_slice(&icicle_compressed_input_expression);
+                    d_temp.copy_from_host_async(h_icicle_compressed_input_expression, &stream).unwrap();
 
-        let log_derivatives_diff: Vec<C::Scalar> = c_scalars_from_device_vec(&mut d_inputs_log_derivatives, &stream);
+                    inplace_scalar_add(&mut d_temp, &icicle_beta, &stream);
+                    inplace_invert(&mut d_temp, &stream);
+                    inplace_add(&mut d_inputs_log_derivatives, &d_temp, &stream);
+                }
+                
+                inplace_scalar_add(&mut d_compressed_table_expression, &icicle_beta, &stream);
+                inplace_invert(&mut d_compressed_table_expression, &stream);
+                        
+                inplace_mul(&mut d_m_values, &d_compressed_table_expression, &stream);
+                inplace_sub(&mut d_inputs_log_derivatives, &d_m_values, &stream);
 
-        stream.synchronize().unwrap();
-        stream.destroy().unwrap();
+                let result = c_scalars_from_device_vec(&mut d_inputs_log_derivatives, &stream);
+
+                stream.synchronize().unwrap();
+                stream.destroy().unwrap();
+                
+                result
+            }
+            #[cfg(not(feature = "gpu-accelerated"))]
+            {
+                // CPU fallback using original algorithm
+                // ∑ 1/(φ_i(X))
+                let mut inputs_log_derivatives = vec![C::Scalar::ZERO; params.n() as usize];
+                for compressed_input_expression in self.compressed_inputs_expressions.iter() {
+                    let mut input_log_derivatives = vec![C::Scalar::ZERO; params.n() as usize];
+
+                    parallelize(
+                        &mut input_log_derivatives,
+                        |input_log_derivatives, start| {
+                            for (input_log_derivative, fi) in input_log_derivatives
+                                .iter_mut()
+                                .zip(compressed_input_expression[start..].iter())
+                            {
+                                *input_log_derivative = *beta + fi;
+                            }
+                        },
+                    );
+                    input_log_derivatives.iter_mut().batch_invert();
+
+                    // TODO: remove last blinders from this
+                    for i in 0..params.n() as usize {
+                        inputs_log_derivatives[i] += input_log_derivatives[i];
+                    }
+                }
+
+                // 1 / τ(X)
+                let mut table_log_derivatives = vec![C::Scalar::ZERO; params.n() as usize];
+                parallelize(
+                    &mut table_log_derivatives,
+                    |table_log_derivatives, start| {
+                        for (table_log_derivative, ti) in table_log_derivatives
+                            .iter_mut()
+                            .zip(self.compressed_table_expression[start..].iter())
+                        {
+                            *table_log_derivative = *beta + ti;
+                        }
+                    },
+                );
+
+                table_log_derivatives.iter_mut().batch_invert();
+
+                // (Σ 1/(φ_i(X)) - m(X) / τ(X))
+                let mut log_derivatives_diff = vec![C::Scalar::ZERO; params.n() as usize];
+                parallelize(&mut log_derivatives_diff, |log_derivatives_diff, start| {
+                    for (((log_derivative_diff, fi), ti), mi) in log_derivatives_diff
+                        .iter_mut()
+                        .zip(inputs_log_derivatives[start..].iter())
+                        .zip(table_log_derivatives[start..].iter())
+                        .zip(self.m_values[start..].iter())
+                    {
+                        // (Σ 1/(φ_i(X)) - m(X) / τ(X))
+                        *log_derivative_diff = *fi - *mi * *ti;
+                    }
+                });
+                
+                log_derivatives_diff
+            }
+        };
 
         log::trace!(" - log_derivatives_diff {:?}", start.elapsed());
 
@@ -379,19 +448,40 @@ impl<C: CurveAffine> Prepared<C> {
 
         let grand_sum_blind = Blind(C::Scalar::ZERO);
         let start = instant::Instant::now();
-        let phi_commitment = params
-            .commit_lagrange_with_stream(&phi, grand_sum_blind, &stream)
-            .to_affine();
+        let phi_commitment = {
+            #[cfg(feature = "gpu-accelerated")]
+            {
+                let commitment = params.commit_lagrange_with_stream(&phi, grand_sum_blind, &stream).to_affine();
+                stream.synchronize().unwrap();
+                stream.destroy().unwrap();
+                commitment
+            }
+            #[cfg(not(feature = "gpu-accelerated"))]
+            {
+                params.commit_lagrange(&phi, grand_sum_blind).to_affine()
+            }
+        };
         log::trace!(" - phi_commitment {:?}", start.elapsed());
 
         // Hash grand sum commitment
         // transcript.write_point(phi_commitment)?;
 
-        let m_poly = vk.domain.lagrange_to_coeff_stream(self.m_values, &stream);
-        let phi_poly = vk.domain.lagrange_to_coeff_stream(phi, &stream);
-
-        stream.synchronize().unwrap();
-        stream.destroy().unwrap();
+        let (m_poly, phi_poly) = {
+            #[cfg(feature = "gpu-accelerated")]
+            {
+                let m_poly = vk.domain.lagrange_to_coeff_stream(self.m_values, &stream);
+                let phi_poly = vk.domain.lagrange_to_coeff_stream(phi, &stream);
+                stream.synchronize().unwrap();
+                stream.destroy().unwrap();
+                (m_poly, phi_poly)
+            }
+            #[cfg(not(feature = "gpu-accelerated"))]
+            {
+                let m_poly = vk.domain.lagrange_to_coeff(self.m_values);
+                let phi_poly = vk.domain.lagrange_to_coeff(phi);
+                (m_poly, phi_poly)
+            }
+        };
 
         Ok(Committed {
             m_poly,
