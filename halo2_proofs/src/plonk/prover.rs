@@ -242,7 +242,7 @@ where
             // Ignore assignment of advice column in later phase than current one.
             // Okay: Assigning Phase 1 value to Phase 2 column
             // Not okay: Assigning Phase 2 value to Phase 1 column
-            if self.current_phase > column.column_type().phase {
+            if self.current_phase < column.column_type().phase {
                 return Ok(());
             }
 
