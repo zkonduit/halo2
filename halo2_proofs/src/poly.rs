@@ -160,6 +160,14 @@ impl<F, B> Polynomial<F, B> {
     pub fn num_coeffs(&self) -> usize {
         self.values.len()
     }
+
+    /// from vec
+    pub fn from_vec(values: Vec<F>) -> Self {
+        Self {
+            values,
+            _marker: PhantomData,
+        }
+    }
 }
 
 impl<F: SerdePrimeField, B> Polynomial<F, B> {

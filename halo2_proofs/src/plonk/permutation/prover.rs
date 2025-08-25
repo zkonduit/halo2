@@ -1,22 +1,23 @@
 use ff::PrimeField;
 use group::{
-    ff::{BatchInvert, Field},
+    ff::Field,
     Curve,
 };
+#[cfg(feature = "gpu-accelerated")]
+use icicle_runtime::stream::IcicleStream;
 use rand_core::RngCore;
 use std::iter::{self, ExactSizeIterator};
 
 use super::super::{circuit::Any, ChallengeBeta, ChallengeGamma, ChallengeX};
 use super::{Argument, ProvingKey};
 use crate::{
-    arithmetic::{eval_polynomial, parallelize, CurveAffine},
-    plonk::{self, Error},
-    poly::{
+    arithmetic::{eval_polynomial, parallelize, CurveAffine}, plonk::{self, Error}, poly::{
         commitment::{Blind, Params},
         Coeff, ExtendedLagrangeCoeff, LagrangeCoeff, Polynomial, ProverQuery, Rotation,
-    },
-    transcript::{EncodedChallenge, TranscriptWrite},
+    }, transcript::{EncodedChallenge, TranscriptWrite}
 };
+#[cfg(feature = "gpu-accelerated")]
+use crate::icicle::icicle_invert;
 
 pub(crate) struct CommittedSet<C: CurveAffine> {
     pub(crate) permutation_product_poly: Polynomial<C::Scalar, Coeff>,
@@ -80,6 +81,8 @@ impl Argument {
         let mut last_z = C::Scalar::ONE;
 
         let mut sets = vec![];
+        #[cfg(feature = "gpu-accelerated")]
+        let mut stream = IcicleStream::create().unwrap();
 
         for (columns, permutations) in self
             .columns
@@ -115,8 +118,15 @@ impl Argument {
             }
 
             // Invert to obtain the denominator for the permutation product polynomial
-            modified_values.batch_invert();
-
+            #[cfg(feature = "gpu-accelerated")]
+            {
+                modified_values = icicle_invert(&modified_values, &stream);
+            }
+            #[cfg(not(feature = "gpu-accelerated"))]
+            {
+                use ff::BatchInvert;
+                modified_values.batch_invert();
+            }
             // Iterate over each column again, this time finishing the computation
             // of the entire fraction by computing the numerators
             for &column in columns.iter() {
@@ -167,16 +177,48 @@ impl Argument {
             last_z = z[params.n() as usize - (blinding_factors + 1)];
 
             let blind = Blind(C::Scalar::random(&mut rng));
-
-            let permutation_product_commitment_projective = params.commit_lagrange(&z, blind);
+            let permutation_product_commitment_projective = {
+                #[cfg(feature = "gpu-accelerated")]
+                {
+                    params.commit_lagrange_with_stream(&z, blind, &stream)
+                }
+                #[cfg(not(feature = "gpu-accelerated"))]
+                {
+                    params.commit_lagrange(&z, blind)
+                }
+            };
             let permutation_product_blind = blind;
-            let z = domain.lagrange_to_coeff(z);
+            let z = {
+                #[cfg(feature = "gpu-accelerated")]
+                {
+                    domain.lagrange_to_coeff_stream(z, &stream)
+                }
+                #[cfg(not(feature = "gpu-accelerated"))]
+                {
+                    domain.lagrange_to_coeff(z)
+                }
+            };
             let permutation_product_poly = z.clone();
-
-            let permutation_product_coset = domain.coeff_to_extended(&z);
+            let permutation_product_coset = {
+                #[cfg(feature = "gpu-accelerated")]
+                {
+                    domain.coeff_to_extended(&z, &stream)
+                }
+                #[cfg(not(feature = "gpu-accelerated"))]
+                {
+                    domain.coeff_to_extended(&z)
+                }
+            };
+            
+            #[cfg(feature = "gpu-accelerated")]
+            {
+                stream.synchronize().unwrap();
+                stream.destroy().unwrap();
+            }
 
             let permutation_product_commitment =
                 permutation_product_commitment_projective.to_affine();
+
 
             // Hash the permutation product commitment
             transcript.write_point(permutation_product_commitment)?;
@@ -186,6 +228,12 @@ impl Argument {
                 permutation_product_coset,
                 permutation_product_blind,
             });
+        }
+
+        #[cfg(feature = "gpu-accelerated")]
+        {
+            stream.synchronize().unwrap();
+            stream.destroy().unwrap();
         }
 
         Ok(Committed { sets })

@@ -1,6 +1,10 @@
-use crate::arithmetic::{best_multiexp, g_to_lagrange, parallelize};
+use crate::arithmetic::{g_to_lagrange, parallelize};
+#[cfg(feature = "gpu-accelerated")]
+use crate::arithmetic::best_multiexp_gpu;
 
 use crate::helpers::SerdeCurveAffine;
+#[cfg(feature = "gpu-accelerated")]
+use crate::icicle::icicle_points_from_c;
 use crate::poly::commitment::{Blind, CommitmentScheme, Params, ParamsProver, ParamsVerifier};
 use crate::poly::{Coeff, LagrangeCoeff, Polynomial};
 use crate::SerdeFormat;
@@ -13,19 +17,47 @@ use rand_core::{OsRng, RngCore};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
-use std::io;
+use std::{fmt, io};
+#[cfg(feature = "gpu-accelerated")]
+use icicle_bn254::curve::CurveCfg;
+#[cfg(feature = "gpu-accelerated")]
+use icicle_core::curve::Affine;
+#[cfg(feature = "gpu-accelerated")]
+use icicle_runtime::memory::{DeviceVec, HostSlice};
+#[cfg(feature = "gpu-accelerated")]
+use icicle_runtime::stream::IcicleStream;
+#[cfg(feature = "gpu-accelerated")]
+use std::sync::Arc;
 
 use super::msm::MSMKZG;
 
 /// These are the public parameters for the polynomial commitment scheme.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ParamsKZG<E: Engine> {
     pub(crate) k: u32,
     pub(crate) n: u64,
     pub(crate) g: Vec<E::G1Affine>,
+    #[cfg(feature = "gpu-accelerated")]
+    pub(crate) gpu_g: Arc<DeviceVec<Affine<CurveCfg>>>,
+    #[cfg(feature = "gpu-accelerated")]
+    pub(crate) gpu_g_lagrange: Arc<DeviceVec<Affine<CurveCfg>>>,
     pub(crate) g_lagrange: Vec<E::G1Affine>,
     pub(crate) g2: E::G2Affine,
     pub(crate) s_g2: E::G2Affine,
+}
+
+impl<E: Engine> fmt::Debug for ParamsKZG<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ParamsKZG")
+            .field("k", &self.k)
+            .field("n", &self.n)
+            .field("g", &self.g)
+            .field("g_lagrange", &self.g_lagrange)
+            // Skipping gpu_g_lagrange
+            .field("g2", &self.g2)
+            .field("s_g2", &self.s_g2)
+            .finish()
+    }
 }
 
 /// Umbrella commitment scheme construction for all KZG variants
@@ -121,13 +153,39 @@ where
         let g2 = <E::G2Affine as PrimeCurveAffine>::generator();
         let s_g2 = (g2 * s).into();
 
-        Self {
-            k,
-            n,
-            g,
-            g_lagrange,
-            g2,
-            s_g2,
+        #[cfg(feature = "gpu-accelerated")]
+        {
+            let mut gpu_g_lagrange: DeviceVec<Affine<CurveCfg>> = DeviceVec::device_malloc(g_lagrange.len()).unwrap();
+            let mut gpu_g: DeviceVec<Affine<CurveCfg>> = DeviceVec::device_malloc(g.len()).unwrap();
+            
+            let converted_g_lagrange = icicle_points_from_c(&g_lagrange[..]);
+            gpu_g_lagrange.copy_from_host(HostSlice::from_slice(&converted_g_lagrange[..])).unwrap();
+
+            let converted_g = icicle_points_from_c(&g[..]);
+            gpu_g.copy_from_host(HostSlice::from_slice(&converted_g[..])).unwrap();
+
+            Self {
+                k,
+                n,
+                g,
+                gpu_g: Arc::new(gpu_g),
+                gpu_g_lagrange: Arc::new(gpu_g_lagrange),
+                g_lagrange,
+                g2,
+                s_g2,
+            }
+        }
+        
+        #[cfg(not(feature = "gpu-accelerated"))]
+        {
+            Self {
+                k,
+                n,
+                g,
+                g_lagrange,
+                g2,
+                s_g2,
+            }
         }
     }
 
@@ -152,13 +210,39 @@ where
             None => g_to_lagrange(g.iter().map(PrimeCurveAffine::to_curve).collect(), k),
         };
 
-        Self {
-            k,
-            n: 1 << k,
-            g_lagrange,
-            g,
-            g2,
-            s_g2,
+        #[cfg(feature = "gpu-accelerated")]
+        {
+            let mut gpu_g_lagrange: DeviceVec<Affine<CurveCfg>> = DeviceVec::device_malloc(g_lagrange.len()).unwrap();
+            let mut gpu_g: DeviceVec<Affine<CurveCfg>> = DeviceVec::device_malloc(g.len()).unwrap();
+            
+            let converted_g_lagrange = icicle_points_from_c(&g_lagrange[..]);
+            gpu_g_lagrange.copy_from_host(HostSlice::from_slice(&converted_g_lagrange[..])).unwrap();
+
+            let converted_g = icicle_points_from_c(&g[..]);
+            gpu_g.copy_from_host(HostSlice::from_slice(&converted_g[..])).unwrap();
+
+            Self {
+                k,
+                n: 1 << k,
+                g_lagrange,
+                gpu_g_lagrange: Arc::new(gpu_g_lagrange),
+                gpu_g: Arc::new(gpu_g),
+                g,
+                g2,
+                s_g2,
+            }
+        }
+        
+        #[cfg(not(feature = "gpu-accelerated"))]
+        {
+            Self {
+                k,
+                n: 1 << k,
+                g_lagrange,
+                g,
+                g2,
+                s_g2,
+            }
         }
     }
 
@@ -265,14 +349,40 @@ where
         let g2 = E::G2Affine::read(reader, format)?;
         let s_g2 = E::G2Affine::read(reader, format)?;
 
-        Ok(Self {
-            k,
-            n: n as u64,
-            g,
-            g_lagrange,
-            g2,
-            s_g2,
-        })
+        #[cfg(feature = "gpu-accelerated")]
+        {
+            let mut gpu_g_lagrange: DeviceVec<Affine<CurveCfg>> = DeviceVec::device_malloc(g_lagrange.len()).unwrap();
+            let mut gpu_g: DeviceVec<Affine<CurveCfg>> = DeviceVec::device_malloc(g.len()).unwrap();
+            
+            let converted_g_lagrange = icicle_points_from_c(&g_lagrange[..]);
+            gpu_g_lagrange.copy_from_host(HostSlice::from_slice(&converted_g_lagrange[..])).unwrap();
+
+            let converted_g = icicle_points_from_c(&g[..]);
+            gpu_g.copy_from_host(HostSlice::from_slice(&converted_g[..])).unwrap();
+
+            Ok(Self {
+                k,
+                n: n as u64,
+                g,
+                gpu_g: Arc::new(gpu_g),
+                gpu_g_lagrange: Arc::new(gpu_g_lagrange),
+                g_lagrange,
+                g2,
+                s_g2,
+            })
+        }
+        
+        #[cfg(not(feature = "gpu-accelerated"))]
+        {
+            Ok(Self {
+                k,
+                n: n as u64,
+                g,
+                g_lagrange,
+                g2,
+                s_g2,
+            })
+        }
     }
 }
 
@@ -312,13 +422,32 @@ where
     }
 
     fn commit_lagrange(&self, poly: &Polynomial<E::Fr, LagrangeCoeff>, _: Blind<E::Fr>) -> E::G1 {
-        let mut scalars = Vec::with_capacity(poly.len());
+        let mut scalars: Vec<E::Fr>  = Vec::with_capacity(poly.len());
         scalars.extend(poly.iter());
         let bases = &self.g_lagrange;
         let size = scalars.len();
         assert!(bases.len() >= size);
 
-        best_multiexp(&scalars, &bases[0..size])
+        #[cfg(feature = "gpu-accelerated")]
+        {
+            best_multiexp_gpu::<E::G1Affine>(&scalars, &self.gpu_g_lagrange[0..size], &IcicleStream::default())
+        }
+        #[cfg(not(feature = "gpu-accelerated"))]
+        {
+            use crate::arithmetic::best_multiexp_cpu;
+            best_multiexp_cpu(&scalars, &bases[0..size])
+        }
+    }
+
+    #[cfg(feature = "gpu-accelerated")]
+    fn commit_lagrange_with_stream(&self, poly: &Polynomial<E::Fr, LagrangeCoeff>, _: Blind<E::Fr>, stream: &IcicleStream) -> E::G1 {
+        let mut scalars: Vec<E::Fr>  = Vec::with_capacity(poly.len());
+        scalars.extend(poly.iter());
+        let bases = &self.g_lagrange;
+        let size = scalars.len();
+        assert!(bases.len() >= size);
+
+        best_multiexp_gpu::<E::G1Affine>(&scalars, &self.gpu_g_lagrange[0..size], stream)
     }
 
     /// Writes params to a buffer.
@@ -357,13 +486,21 @@ where
     }
 
     fn commit(&self, poly: &Polynomial<E::Fr, Coeff>, _: Blind<E::Fr>) -> E::G1 {
-        let mut scalars = Vec::with_capacity(poly.len());
+        let mut scalars: Vec<E::Fr> = Vec::with_capacity(poly.len());
         scalars.extend(poly.iter());
         let bases = &self.g;
         let size = scalars.len();
         assert!(bases.len() >= size);
 
-        best_multiexp(&scalars, &bases[0..size])
+        #[cfg(feature = "gpu-accelerated")]
+        {
+            best_multiexp_gpu::<E::G1Affine>(&scalars, &self.gpu_g[0..size], &IcicleStream::default())
+        }
+        #[cfg(not(feature = "gpu-accelerated"))]
+        {
+            use crate::arithmetic::best_multiexp_cpu;
+            best_multiexp_cpu(&scalars, &bases[0..size])
+        }
     }
 
     fn get_g(&self) -> &[E::G1Affine] {
